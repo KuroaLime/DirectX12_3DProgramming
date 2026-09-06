@@ -1,0 +1,44 @@
+# Visual Studio local/user files
+.vs/
+.vshistory/
+*.vcxproj.user
+*.sdf
+*.opensdf
+*.suo
+*.VC.db
+*.VC.VC.opendb
+*.aps
+
+# Native C++ build output directories (any project folder, any depth)
+x64/
+x86/
+ARM/
+ARM64/
+Debug/
+Release/
+ipch/
+
+# Compiler / linker intermediates
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.tlog
+*.log
+*.res
+*.exp
+*.exe.recipe
+*.pgc
+*.pgd
+
+# Local dev build executables
+*.exe
+
+# Keep the packaged deliverable folder (game assets + runnable exe for submission/portfolio)
+!**/Excutable/**
+!**/Excute/**
+
+# Claude Code local (machine-specific) settings
+.claude/settings.local.json
