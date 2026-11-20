@@ -1145,17 +1145,22 @@ void CGameObject::GenerateRayForPicking(XMVECTOR& xmvPickPosition, XMMATRIX& xmm
 }
 int CGameObject::PickOOBBByRayIntersection(XMVECTOR& xmvPickPosition, XMMATRIX& xmmtxView, float* pfHitDistance, XMMATRIX& xmmtxProjection)
 {
+    if (!pfHitDistance || !m_bAlive || !m_bCollidable) return false;
 
-	BOOL nIntersected = false;
+    // Instanced helicopters have an empty root with meshes on child frames.
+    const BoundingOrientedBox* bounds = nullptr;
+    if (m_pChild) bounds = &m_xmBigOOGG;
+    else if (m_ppMeshes && m_ppMeshes[0]) bounds = &m_ppMeshes[0]->m_xmOOBB;
+    if (!bounds) return false;
 
-	if (m_ppMeshes && m_ppMeshes[0])
-	{
-		XMVECTOR xmvPickRayOrigin, xmvPickRayDirection;
-		GenerateRayForPicking(xmvPickPosition, xmmtxView, xmvPickRayOrigin, xmvPickRayDirection, xmmtxProjection);
-		nIntersected = m_ppMeshes[0]->CheckRayIntersectionOOBB(xmvPickRayOrigin, xmvPickRayDirection, pfHitDistance);
-		
-	}
-	return(nIntersected);
+    XMVECTOR origin, direction;
+    GenerateRayForPicking(xmvPickPosition, xmmtxView, origin, direction, xmmtxProjection);
+    float distance;
+    if (!bounds->Intersects(origin, direction, distance)) return false;
+    // GenerateRayForPicking normalizes in model space. Compare hits in world units.
+    XMVECTOR offset = XMVector3TransformNormal(XMVectorScale(direction, distance), XMLoadFloat4x4(&m_xmf4x4World));
+    *pfHitDistance = XMVectorGetX(XMVector3Length(offset));
+    return true;
 }
 
 
@@ -1316,6 +1321,7 @@ CMssileObject::CMssileObject(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList
 
 CMssileObject::~CMssileObject()
 {
+	if (m_pOwnerScene) m_pOwnerScene->m_CollisionValue.RemoveObjectFromGrid(this);
 }
 void CMssileObject::OrientToDirection(const XMFLOAT3& dir)
 {
@@ -1341,6 +1347,7 @@ void CMssileObject::Fire(const XMFLOAT3& startPos, const XMFLOAT3& dir, CGameObj
 {
 
 	XMFLOAT3 normDir = dir;
+	if (Vector3::Length(normDir) < EPSILON) return;
 	normDir = Vector3::Normalize(normDir);
 
 	m_xmf3Direction = normDir;
@@ -1355,12 +1362,23 @@ void CMssileObject::Fire(const XMFLOAT3& startPos, const XMFLOAT3& dir, CGameObj
 
 	OrientToDirection(m_xmf3Direction);
 }
+void CMssileObject::Hit(CGameObject* pTarget)
+{
+	if (!m_bActive) return;
+	if (pTarget && pTarget->GetLayer() == EObjectLayer::Enemy && pTarget->GetHealth() > 0.0f)
+	{
+		pTarget->Damage(1000);
+		if (pTarget->GetHealth() <= 0.0f) pTarget->Die();
+	}
+	Explode();
+}
 void CMssileObject::Explode() 
 {
 	m_bActive = false;
 	SetCollidable(false);
 	bRender = false;
-
+	m_pTarget = nullptr;
+	if (m_pOwnerScene) m_pOwnerScene->m_CollisionValue.RemoveObjectFromGrid(this);
 }
 void CMssileObject::Animate(float fTimeElapsed, XMFLOAT4X4* pxmf4x4Parent) {
 	if (!m_bActive) return;
@@ -1373,22 +1391,24 @@ void CMssileObject::Animate(float fTimeElapsed, XMFLOAT4X4* pxmf4x4Parent) {
 	}
 
 	XMFLOAT3 pos = GetPosition();
+	const float travelDistance = m_fSpeed * fTimeElapsed;
 
 	if (m_pTarget && m_pTarget->GetHealth() > 0.0f)
 	{
 		XMFLOAT3 targetPos = m_pTarget->GetPosition();
 		XMFLOAT3 toTarget = Vector3::Subtract(targetPos, pos);
 
-		if (Vector3::Length(toTarget) < 5.0f)
+		// A homing step that reaches/passes the target must not oscillate across it.
+		if (Vector3::Length(toTarget) <= std::max(5.0f, travelDistance))
 		{
-			Explode();
+			Hit(m_pTarget);
 			return;
 		}
 
 		XMFLOAT3 newDir = Vector3::Normalize(toTarget);
 		m_xmf3Direction = newDir;
 	}
-	XMFLOAT3 shift = Vector3::ScalarProduct(m_xmf3Direction, m_fSpeed * fTimeElapsed, false);
+	XMFLOAT3 shift = Vector3::ScalarProduct(m_xmf3Direction, travelDistance, false);
 	pos = Vector3::Add(pos, shift);
 	SetPosition(pos.x, pos.y, pos.z);
 	OrientToDirection(m_xmf3Direction);
@@ -1397,15 +1417,7 @@ void CMssileObject::Animate(float fTimeElapsed, XMFLOAT4X4* pxmf4x4Parent) {
 }
 void CMssileObject::Render(ID3D12GraphicsCommandList* cmd, CCamera* pCamera, bool bSkipMaterial, int nPipelineState)
 {
-
-	if (m_nMaterials > 0 && m_ppMaterials[0] && m_ppMaterials[0]->m_pShader)
-	{
-		OutputDebugStringA("Missile Render: shader bound for missile\n");
-	}
-	if (m_nMeshes > 0 && m_ppMeshes[0])
-	{
-		OutputDebugStringA("Missile Render: mesh is StandardMesh?\n");
-	}
+	if (!m_bActive) return;
 	CGameObject::Render(cmd, pCamera, bSkipMaterial, nPipelineState);
 }
 ///////////////

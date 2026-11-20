@@ -169,7 +169,8 @@ void CGameFramework::CreateDirect3DDevice()
 	d3dMsaaQualityLevels.NumQualityLevels = 0;
 	hResult = m_pd3dDevice->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &d3dMsaaQualityLevels, sizeof(D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS));
 	m_nMsaa4xQualityLevels = d3dMsaaQualityLevels.NumQualityLevels;
-	m_bMsaa4xEnable = (m_nMsaa4xQualityLevels > 1) ? true : false;
+	// The flip-model swap chain, post-process textures, and PSOs all use one sample.
+	m_bMsaa4xEnable = false;
 
 	hResult = m_pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), (void **)&m_pd3dFence);
 	for (UINT i = 0; i < m_nSwapChainBuffers; i++) m_nFenceValues[i] = 0;
@@ -288,11 +289,12 @@ void CGameFramework::CreatePostProcessResources()
 	clearValue.Color[2] = 0.3f;
 	clearValue.Color[3] = 1.0f;
 
+	// Match the states expected by FrameAdvance, including the very first frame.
 	HRESULT hr = m_pd3dDevice->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
 		D3D12_HEAP_FLAG_NONE,
 		&texDesc,
-		D3D12_RESOURCE_STATE_RENDER_TARGET,   
+		D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
 		&clearValue,
 		IID_PPV_ARGS(&m_pd3dSceneColor));
 
@@ -301,7 +303,7 @@ void CGameFramework::CreatePostProcessResources()
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
 		D3D12_HEAP_FLAG_NONE,
 		&texDesc,
-		D3D12_RESOURCE_STATE_UNORDERED_ACCESS,  
+		D3D12_RESOURCE_STATE_COPY_SOURCE,
 		nullptr,
 		IID_PPV_ARGS(&m_pd3dBlurColor));
 
@@ -475,6 +477,12 @@ void CGameFramework::ChangeSwapChainState()
 
 void CGameFramework::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam, CCamera* pCamera)
 {
+    CScene* scene = m_pStageManager ? m_pStageManager->GetScene() : nullptr;
+    if (!scene || !scene->UsesPlayerControls())
+    {
+        if (m_pStageManager) m_pStageManager->OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam, pCamera);
+        return;
+    }
 	
 	switch (nMessageID)
 	{
@@ -500,6 +508,12 @@ void CGameFramework::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM
 
 void CGameFramework::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam)
 {
+    CScene* scene = m_pStageManager ? m_pStageManager->GetScene() : nullptr;
+    if (!scene || !scene->UsesPlayerControls())
+    {
+        if (m_pStageManager) m_pStageManager->OnProcessingKeyboardMessage(hWnd, nMessageID, wParam, lParam);
+        return;
+    }
 	switch (nMessageID)
 	{
 		case WM_KEYUP:
@@ -543,7 +557,15 @@ LRESULT CALLBACK CGameFramework::OnProcessingWindowMessage(HWND hWnd, UINT nMess
 		case WM_ACTIVATE:
 		{
 			if (LOWORD(wParam) == WA_INACTIVE)
-				m_GameTimer.Stop();
+            {
+                m_GameTimer.Stop();
+                if (GetCapture() == m_hWnd) ReleaseCapture();
+                if (m_pPlayer)
+                {
+                    m_pPlayer->SetMoveInput(false);
+                    m_pPlayer->SetVelocity(XMFLOAT3(0.0f, 0.0f, 0.0f));
+                }
+            }
 			else
 				m_GameTimer.Start();
 			break;
@@ -628,6 +650,7 @@ void CGameFramework::BuildObjects()
 	m_pStageManager->SetPlayer(pAirplanePlayer);
 	m_pPlayer = pAirplanePlayer;
 	m_pCamera = m_pPlayer->GetCamera();
+	m_pPlayer->UpdateCamera(0.0f, true);
 
 	m_pd3dCommandList->Close();
 	ID3D12CommandList *ppd3dCommandLists[] = { m_pd3dCommandList };
@@ -651,54 +674,65 @@ void CGameFramework::ReleaseObjects()
 
 void CGameFramework::ProcessInput()
 {
-	static UCHAR pKeysBuffer[256];
-	bool bProcessedByScene = false;
+    if (!m_pPlayer) return;
 
-	if (GetKeyboardState(pKeysBuffer) && m_pStageManager) bProcessedByScene = m_pStageManager->ProcessInput(pKeysBuffer);
-	if (!bProcessedByScene)
-	{
-		m_pPlayer->StoreOriginalPosition();
-		DWORD dwDirection = 0;
-		
-		if (pKeysBuffer[VK_UP] & 0xF0) dwDirection |= DIR_FORWARD;
-		if (pKeysBuffer[VK_DOWN] & 0xF0) dwDirection |= DIR_BACKWARD;
-		if (pKeysBuffer[VK_LEFT] & 0xF0) dwDirection |= DIR_LEFT;
-		if (pKeysBuffer[VK_RIGHT] & 0xF0) dwDirection |= DIR_RIGHT;
-		if (pKeysBuffer[VK_SHIFT] & 0xF0) dwDirection |= DIR_UP;
-		if (pKeysBuffer[VK_CONTROL] & 0xF0) dwDirection |= DIR_DOWN;
+    const float elapsed = m_GameTimer.GetTimeElapsed();
+    m_pPlayer->SetMoveInput(false);
 
-		float cxDelta = 0.0f, cyDelta = 0.0f;
-		POINT ptCursorPos;
-		if (GetCapture() == m_hWnd)
-		{
-			SetCursor(NULL);
-			GetCursorPos(&ptCursorPos);
-			cxDelta = (float)(ptCursorPos.x - m_ptOldCursorPos.x) / 3.0f;
-			cyDelta = (float)(ptCursorPos.y - m_ptOldCursorPos.y) / 3.0f;
-			SetCursorPos(m_ptOldCursorPos.x, m_ptOldCursorPos.y);
-		}
+    UCHAR keys[256] = {};
+    const bool keyboardAvailable = (GetActiveWindow() == m_hWnd) && GetKeyboardState(keys);
+    CScene* scene = m_pStageManager ? m_pStageManager->GetScene() : nullptr;
+    const bool sceneHandled = keyboardAvailable && m_pStageManager && m_pStageManager->ProcessInput(keys);
+    const bool usePlayerControls = scene && scene->UsesPlayerControls();
 
-		if ((dwDirection != 0) || (cxDelta != 0.0f) || (cyDelta != 0.0f))
-		{
-			if (cxDelta || cyDelta)
-			{
-				if (pKeysBuffer[VK_RBUTTON] & 0xF0)
-					m_pPlayer->Rotate(cyDelta, 0.0f, -cxDelta);
-				else
-					m_pPlayer->Rotate(cyDelta, cxDelta, 0.0f);
-			}
-			m_pPlayer->SetMoveInput(dwDirection != 0);
-			if (dwDirection)
-			{
-				
-				m_pPlayer->Move(dwDirection, 2.25f, true);
-			}
-		}
-	}
-	m_pPlayer->Update(m_GameTimer.GetTimeElapsed());
+    if (!usePlayerControls)
+    {
+        m_pPlayer->SetVelocity(XMFLOAT3(0.0f, 0.0f, 0.0f));
+        return;
+    }
+
+    if (keyboardAvailable && !sceneHandled)
+    {
+        const auto down = [&keys](int key) { return (keys[key] & 0x80) != 0; };
+        const int forward = int(down('W') || down(VK_UP)) - int(down('S') || down(VK_DOWN));
+        const int right = int(down('D') || down(VK_RIGHT)) - int(down('A') || down(VK_LEFT));
+        const int up = int(down('Q') || down(VK_SHIFT)) - int(down('R') || down(VK_CONTROL));
+        DWORD direction = 0;
+        if (forward > 0) direction |= DIR_FORWARD;
+        if (forward < 0) direction |= DIR_BACKWARD;
+        if (right > 0) direction |= DIR_RIGHT;
+        if (right < 0) direction |= DIR_LEFT;
+        if (up > 0) direction |= DIR_UP;
+        if (up < 0) direction |= DIR_DOWN;
+        m_pPlayer->SetMoveInput(direction != 0);
+        m_pPlayer->StoreOriginalPosition();
+
+        if (GetCapture() == m_hWnd)
+        {
+            POINT cursor;
+            SetCursor(NULL);
+            if (GetCursorPos(&cursor))
+            {
+                // Screen displacement is already frame independent; keep sensitivity in degrees per pixel.
+                constexpr float mouseDegreesPerPixel = 0.20f;
+                const float dx = float(cursor.x - m_ptOldCursorPos.x) * mouseDegreesPerPixel;
+                const float dy = float(cursor.y - m_ptOldCursorPos.y) * mouseDegreesPerPixel;
+                SetCursorPos(m_ptOldCursorPos.x, m_ptOldCursorPos.y);
+                if (down(VK_RBUTTON)) m_pPlayer->Rotate(dy, 0.0f, -dx);
+                else m_pPlayer->Rotate(dy, dx, 0.0f);
+            }
+        }
+
+        // Preserve the old 60 Hz acceleration while making it time based.
+        const float acceleration = 135.0f;
+        if (direction) m_pPlayer->Move(direction, acceleration * elapsed, true);
+    }
+
+    m_pPlayer->Update(elapsed);
 }
 void CGameFramework::ChangeScene()
 {
+	if (GetCapture() == m_hWnd) ReleaseCapture();
 	WaitForGpuComplete();
 
 	if (m_pStageManager) m_pStageManager->ReleaseObjects();
@@ -721,6 +755,7 @@ void CGameFramework::ChangeScene()
 	m_pStageManager->SetPlayer(pAirplanePlayer);
 	m_pPlayer = pAirplanePlayer;
 	m_pCamera = m_pPlayer->GetCamera();
+	m_pPlayer->UpdateCamera(0.0f, true);
 	m_pStageManager->GetScene()->SetPlayer(m_pPlayer);
 
 	hResult = m_pd3dCommandList->Close();
@@ -731,6 +766,7 @@ void CGameFramework::ChangeScene()
 
 	if (m_pStageManager) m_pStageManager->ReleaseUploadBuffers();
 	if (m_pPlayer) m_pPlayer->ReleaseUploadBuffers();
+	m_GameTimer.Reset();
 }
 void CGameFramework::AnimateObjects()
 {
@@ -738,7 +774,12 @@ void CGameFramework::AnimateObjects()
 
 	if (m_pStageManager) m_pStageManager->AnimateObjects(fTimeElapsed);
 
-	m_pPlayer->Animate(fTimeElapsed, NULL);
+    if (m_pPlayer)
+    {
+        m_pPlayer->Animate(fTimeElapsed, NULL);
+        // Scene animation has completed all collision corrections for this frame.
+        m_pPlayer->UpdateCamera(fTimeElapsed);
+    }
 }
 
 void CGameFramework::WaitForGpuComplete()
@@ -772,6 +813,11 @@ void CGameFramework::MoveToNextFrame()
 void CGameFramework::FrameAdvance()
 {    
 	m_GameTimer.Tick(0.0f);
+    if (m_GameTimer.GetTimeElapsed() <= 0.0f)
+    {
+        ::Sleep(10);
+        return;
+    }
 
 	ProcessInput();
 	AnimateObjects();

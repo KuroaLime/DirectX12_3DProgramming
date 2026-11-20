@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "LabProject08-1-3.h"
 #include "GameFramework.h"
+#include <exception>
 
 #define MAX_LOADSTRING 100
 
@@ -19,6 +20,7 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
+try
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
@@ -53,6 +55,12 @@ int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCm
 	gGameFramework.OnDestroy();
 
 	return((int)msg.wParam);
+}
+catch (const std::exception& error)
+{
+	::OutputDebugStringA(error.what());
+	::MessageBoxA(NULL, error.what(), "DirectX initialization/rendering error", MB_OK | MB_ICONERROR);
+	return(EXIT_FAILURE);
 }
 
 ATOM MyRegisterClass(HINSTANCE hInstance)
@@ -107,6 +115,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	switch (message)
 	{
+	case WM_ACTIVATE:
 	case WM_SIZE:
 	case WM_LBUTTONDOWN:
 	case WM_LBUTTONUP:

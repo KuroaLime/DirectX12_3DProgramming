@@ -32,7 +32,6 @@ public:
 
 	CShader* m_pTextureAtlasShader = NULL;
 	CMaterial* m_pScoreMaterial = NULL;
-	std::vector<CGameObject*> m_vpScoreDigits;
 	int m_nScore = 0;
 
 
@@ -59,5 +58,40 @@ public:
 	CExplosionShader* m_ppExplosionShaders = NULL;
 	virtual void RenderShadowMap(ID3D12GraphicsCommandList* pd3dCommandList) override;
 	
+private:
+    CMaterial* CreateHudMaterial(ID3D12Device* device, ID3D12GraphicsCommandList* commands,
+        const wchar_t* texturePath, CShader* shader);
+    CGameObject* CreateHudQuad(ID3D12Device* device, ID3D12GraphicsCommandList* commands,
+        const char* name, CMaterial* material, float width, float height, float centerX, float centerYFromTop,
+        const XMFLOAT4& meshUv = XMFLOAT4(0, 0, 1, 1));
+    static void SetHudNumber(CGameObject* const* digits, size_t count, int value, bool leadingZeros);
+    CGameObject* GetLiveLockTarget() const;
+    void BuildFlightDisplay(ID3D12Device* device, ID3D12GraphicsCommandList* commands);
+    void UpdateFlightDisplay();
+    void BuildTargetDisplay(ID3D12Device* device, ID3D12GraphicsCommandList* commands);
+    void UpdateTargetDisplay(CCamera* camera);
+    void UpdateBattleHud(float elapsed);
+
+    struct RadarContact {
+        CGameObject* enemy;
+        CGameObject* marker;
+    };
+    std::vector<RadarContact> m_radarContacts;
+    CGameObject* m_pRadarSweep = nullptr;
+    CGameObject* m_pHullFill = nullptr;
+    CGameObject* m_hullDigits[3] = {};
+    CGameObject* m_scoreDigits[6] = {};
+
+    CGameObject* m_pHeadingTape = nullptr;
+    CGameObject* m_ppHeadingDigits[3] = {};
+    CGameObject* m_ppSpeedDigits[3] = {};
+    CGameObject* m_ppHeightDigits[4] = {};
+
+    CGameObject* m_pAimReticle = nullptr;
+    CGameObject* m_pTargetCorners[4] = {};
+    CGameObject* m_pTargetLockCue = nullptr;
+    CGameObject* m_pTargetDisplayTracked = nullptr;
+    float m_fTargetAcquiredAt = 0.0f;
+    float m_fHudTime = 0.0f;
 };
 

@@ -68,6 +68,7 @@ public:
 	void Rotate(float x, float y, float z);
 
 	void Update(float fTimeElapsed);
+	void UpdateCamera(float fTimeElapsed, bool bSnap = false);
 
 	virtual void OnPlayerUpdateCallback(float fTimeElapsed) { }
 	void SetPlayerUpdatedContext(LPVOID pContext) { m_pPlayerUpdatedContext = pContext; }

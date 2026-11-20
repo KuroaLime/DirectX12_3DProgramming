@@ -7,6 +7,7 @@
 #include"StaticObject.h"
 #include <unordered_set>
 #include <algorithm>
+#include <stdexcept>
 //CDescriptorHeap* CScene::m_pDescriptorHeap = NULL;
 
 CDescriptorHeap::CDescriptorHeap()
@@ -22,12 +23,27 @@ CDescriptorHeap::~CDescriptorHeap()
 
 void CScene::CreateCbvSrvDescriptorHeaps(ID3D12Device* pd3dDevice, int nConstantBufferViews, int nShaderResourceViews)
 {
-	D3D12_DESCRIPTOR_HEAP_DESC d3dDescriptorHeapDesc;
-	d3dDescriptorHeapDesc.NumDescriptors = nConstantBufferViews + nShaderResourceViews; //CBVs + SRVs 
+	if (!pd3dDevice || !m_pDescriptorHeap || nConstantBufferViews < 0 || nShaderResourceViews < 0 ||
+		(static_cast<UINT64>(nConstantBufferViews) + nShaderResourceViews == 0))
+	{
+		throw std::invalid_argument("Cannot create a descriptor heap: invalid device, heap owner, or descriptor count.");
+	}
+
+	D3D12_DESCRIPTOR_HEAP_DESC d3dDescriptorHeapDesc = {};
+	d3dDescriptorHeapDesc.NumDescriptors = static_cast<UINT>(nConstantBufferViews) + static_cast<UINT>(nShaderResourceViews); //CBVs + SRVs
 	d3dDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	d3dDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	d3dDescriptorHeapDesc.NodeMask = 0;
-	pd3dDevice->CreateDescriptorHeap(&d3dDescriptorHeapDesc, __uuidof(ID3D12DescriptorHeap), (void**)&m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap);
+	HRESULT hResult = pd3dDevice->CreateDescriptorHeap(&d3dDescriptorHeapDesc, IID_PPV_ARGS(&m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap));
+	if (FAILED(hResult))
+	{
+		char message[256];
+		sprintf_s(message,
+			"CreateDescriptorHeap failed (CBV=%d, SRV=%d, HRESULT=0x%08lX, DeviceRemovedReason=0x%08lX).",
+			nConstantBufferViews, nShaderResourceViews, static_cast<unsigned long>(hResult),
+			static_cast<unsigned long>(pd3dDevice->GetDeviceRemovedReason()));
+		throw std::runtime_error(message);
+	}
 
 	m_pDescriptorHeap->m_d3dCbvCPUDescriptorStartHandle = m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	m_pDescriptorHeap->m_d3dCbvGPUDescriptorStartHandle = m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
@@ -426,7 +442,7 @@ ID3D12RootSignature *CScene::CreateGraphicsRootSignature(ID3D12Device *pd3dDevic
 	pd3dRootParameters[15].DescriptorTable.pDescriptorRanges = &pd3dDescriptorRanges[11];
 	pd3dRootParameters[15].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-	D3D12_STATIC_SAMPLER_DESC pd3dSamplerDescs[4];
+	D3D12_STATIC_SAMPLER_DESC pd3dSamplerDescs[4] = {};
 
 	pd3dSamplerDescs[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	pd3dSamplerDescs[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -732,6 +748,16 @@ void CScene::OnCollision(CGameObject* a, CGameObject* b, const XMVECTOR& mtv)
 	
 	if (!a || !b) return;
 	if (!a->IsCollidable() || !b->IsCollidable()) return;
+	if (auto* pMissile = dynamic_cast<CMssileObject*>(a))
+	{
+		pMissile->Hit(b);
+		return;
+	}
+	if (auto* pMissile = dynamic_cast<CMssileObject*>(b))
+	{
+		pMissile->Hit(a);
+		return;
+	}
 
 	XMVECTOR vMtv = mtv;
 	float depth = XMVectorGetX(XMVector3Length(vMtv));
@@ -824,19 +850,7 @@ void CScene::OnCollision(CGameObject* a, CGameObject* b, const XMVECTOR& mtv)
 			}
 		}
 	}
-	if (a->GetLayer() == EObjectLayer::PlayerBullet &&
-		b->GetLayer() == EObjectLayer::Enemy)
-	{
-		b->Damage(1000);
-	}
-	else if (b->GetLayer() == EObjectLayer::PlayerBullet &&
-		a->GetLayer() == EObjectLayer::Enemy)
-	{
-		// [수정] 여기서는 a가 적이므로 a에게 데미지를 줘야 하는데 b(미사일 자신)에게 주고 있었음.
-		// 그 결과 이 순서로 페어가 들어오는 절반의 경우 적이 데미지를 전혀 못 받았음.
-		a->Damage(1000);
-	}
-	else if (b->GetLayer() == EObjectLayer::Player &&
+	if (b->GetLayer() == EObjectLayer::Player &&
 		a->GetLayer() == EObjectLayer::Enemy ||
 		a->GetLayer() == EObjectLayer::Player &&
 		b->GetLayer() == EObjectLayer::Enemy) {
@@ -850,19 +864,6 @@ void CScene::OnCollision(CGameObject* a, CGameObject* b, const XMVECTOR& mtv)
 	}
 	else if (b->GetLayer() == EObjectLayer::Enemy && b->GetHealth() <= 0) {
 		b->Die();
-	}
-
-	// [수정] 미사일(PlayerBullet)이 무언가와 충돌하면 데미지만 주고 자기 자신은 계속 날아가던 문제.
-	// 적/지형 등 무엇을 맞히든 그 자리에서 폭발 처리해서 미사일을 비활성화(사라지게) 시킨다.
-	if (a->GetLayer() == EObjectLayer::PlayerBullet)
-	{
-		CMssileObject* pMissile = dynamic_cast<CMssileObject*>(a);
-		if (pMissile) pMissile->Explode();
-	}
-	if (b->GetLayer() == EObjectLayer::PlayerBullet)
-	{
-		CMssileObject* pMissile = dynamic_cast<CMssileObject*>(b);
-		if (pMissile) pMissile->Explode();
 	}
 }
 bool IntersectOOBB(CGameObject* a, CGameObject* b)

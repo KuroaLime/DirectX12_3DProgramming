@@ -139,7 +139,7 @@ ID3D12RootSignature* CStageManager::CreateRepresentativeGraphicsRootSignature(ID
 	pd3dRootParameters[11].DescriptorTable.pDescriptorRanges = &(pd3dDescriptorRanges[8]);
 	pd3dRootParameters[11].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
-	D3D12_STATIC_SAMPLER_DESC pd3dSamplerDescs[2];
+	D3D12_STATIC_SAMPLER_DESC pd3dSamplerDescs[2] = {};
 
 	pd3dSamplerDescs[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 	pd3dSamplerDescs[0].AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -186,27 +186,17 @@ ID3D12RootSignature* CStageManager::CreateRepresentativeGraphicsRootSignature(ID
 	return(pd3dGraphicsRootSignature);
 }
 
-bool CStageManager::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam, CCamera* pCamera) {
-	bool handled = false;
-
-	if (m_pScene)
+bool CStageManager::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam, CCamera* pCamera)
+{
+	if (!m_pScene) return false;
+	const bool handled = m_pScene->OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam, pCamera);
+	if (handled && m_pScene->GetSceneState() && !m_bChangeSceneBool)
 	{
-		handled = m_pScene->OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam, pCamera);
-	}
-	if (handled && m_pScene && m_pScene->GetSceneState())
-	{
-		m_bChangeSceneBool = m_pScene->GetSceneState();
+		m_bChangeSceneBool = true;
 		m_sceneHistory.push(m_bChangeSceneNum);
 		m_bChangeSceneNum = m_pScene->GetSceneNum();
 	}
-	switch (nMessageID)
-	{
-	default:
-		
-		m_pScene->OnProcessingMouseMessage(hWnd, nMessageID, wParam, lParam, pCamera);
-		break;
-	}
-	return(false);
+	return handled;
 }
 bool CStageManager::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam) {
 	switch (nMessageID)
@@ -291,8 +281,7 @@ void CStageManager::ReleaseUploadBuffers() {
 }
 
 bool CStageManager::ProcessInput(UCHAR* pKeysBuffer) {
-	if (m_pScene) m_pScene->ProcessInput(pKeysBuffer);
-	return(false);
+	return m_pScene ? m_pScene->ProcessInput(pKeysBuffer) : false;
 }
 
 void CStageManager::ChangeScene() {

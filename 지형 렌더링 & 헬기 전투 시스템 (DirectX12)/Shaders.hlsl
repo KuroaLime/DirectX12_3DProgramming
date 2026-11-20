@@ -11,6 +11,7 @@ cbuffer cbCameraInfo : register(b1)
 	matrix					gmtxView : packoffset(c0);
 	matrix					gmtxProjection : packoffset(c4);
 	float3					gvCameraPosition : packoffset(c8);
+    float4 gMirrorClipPlane : packoffset(c9);
 };
 
 cbuffer cbGameObjectInfo : register(b2)
@@ -78,6 +79,7 @@ struct VS_STANDARD_OUTPUT
 	float3 tangentW : TANGENT;
 	float3 bitangentW : BITANGENT;
 	float2 uv : TEXCOORD;
+    float mirrorClipDistance : SV_ClipDistance0;
 };
 struct VS_SHADOW_OUTPUT
 {
@@ -132,6 +134,7 @@ VS_STANDARD_OUTPUT VSStandard(VS_STANDARD_INPUT input)
     output.bitangentW = mul(input.bitangent, (float3x3) gmtxGameObject); 
 
     output.position = mul(mul(float4(output.positionW, 1.0f), gmtxView), gmtxProjection);
+    output.mirrorClipDistance = dot(float4(output.positionW, 1.0f), gMirrorClipPlane);
     output.uv = input.uv;
 
     return (output);
@@ -263,33 +266,35 @@ struct VS_TERRAIN_INPUT
 	float2 uv1 : TEXCOORD1;
 };
 
-struct VS_TERRAIN_OUTPUT
+struct TERRAIN_CONTROL_POINT
+{
+    float4 color : COLOR;
+    float2 uv0 : TEXCOORD0;
+    float2 uv1 : TEXCOORD1;
+    float3 worldPos : TEXCOORD2;
+};
+
+struct TERRAIN_RASTER_INPUT
 {
 	float4 position : SV_POSITION;
 	float4 color : COLOR;
 	float2 uv0 : TEXCOORD0;
 	float2 uv1 : TEXCOORD1;
     float3 worldPos : TEXCOORD2;
+    float mirrorClipDistance : SV_ClipDistance0;
 };
 
-VS_TERRAIN_OUTPUT VSTerrain(VS_TERRAIN_INPUT input)
+TERRAIN_CONTROL_POINT VSTerrain(VS_TERRAIN_INPUT input)
 {
-    VS_TERRAIN_OUTPUT output;
-
-    float4 worldPos = mul(float4(input.position, 1.0f), gmtxGameObject);
-    float4 viewPos = mul(worldPos, gmtxView);
-    float4 projPos = mul(viewPos, gmtxProjection);
-
-    output.position = projPos;
+    TERRAIN_CONTROL_POINT output;
     output.color = input.color;
     output.uv0 = input.uv0;
     output.uv1 = input.uv1;
-    output.worldPos = worldPos.xyz;
-
+    output.worldPos = mul(float4(input.position, 1.0f), gmtxGameObject).xyz;
     return output;
 }
 
-float4 PSTerrain(VS_TERRAIN_OUTPUT input) : SV_TARGET
+float4 PSTerrain(TERRAIN_RASTER_INPUT input) : SV_TARGET
 {
     float4 baseC = gtxtTerrainTexture.Sample(gssWrap, input.uv0);
     float4 detailC = gtxtDetailTexture.Sample(gssWrap, input.uv1);
@@ -331,11 +336,11 @@ struct HS_TERRAIN_CONSTANT_DATA_OUTPUT
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(3)]
 [patchconstantfunc("HSPatchConstantsTerrain")]
-VS_TERRAIN_OUTPUT HSTerrain(InputPatch<VS_TERRAIN_OUTPUT, 3> patch, uint i : SV_OutputControlPointID)
+TERRAIN_CONTROL_POINT HSTerrain(InputPatch<TERRAIN_CONTROL_POINT, 3> patch, uint i : SV_OutputControlPointID)
 {
     return patch[i];
 }
-HS_TERRAIN_CONSTANT_DATA_OUTPUT HSPatchConstantsTerrain(InputPatch<VS_TERRAIN_OUTPUT, 3> patch)
+HS_TERRAIN_CONSTANT_DATA_OUTPUT HSPatchConstantsTerrain(InputPatch<TERRAIN_CONTROL_POINT, 3> patch)
 {
     HS_TERRAIN_CONSTANT_DATA_OUTPUT o;
     
@@ -359,9 +364,9 @@ HS_TERRAIN_CONSTANT_DATA_OUTPUT HSPatchConstantsTerrain(InputPatch<VS_TERRAIN_OU
     return o;
 }
 [domain("tri")]
-VS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA_OUTPUT pc,const OutputPatch<VS_TERRAIN_OUTPUT, 3> patch,float3 bary : SV_DomainLocation)
+TERRAIN_RASTER_INPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA_OUTPUT pc,const OutputPatch<TERRAIN_CONTROL_POINT, 3> patch,float3 bary : SV_DomainLocation)
 {
-    VS_TERRAIN_OUTPUT o;
+    TERRAIN_RASTER_INPUT o;
     
     o.worldPos =
           patch[0].worldPos * bary.x
@@ -385,6 +390,7 @@ VS_TERRAIN_OUTPUT DSTerrain(HS_TERRAIN_CONSTANT_DATA_OUTPUT pc,const OutputPatch
     
     float4 viewPos = mul(float4(o.worldPos, 1.0f), gmtxView);
     o.position = mul(viewPos, gmtxProjection);
+    o.mirrorClipDistance = dot(float4(o.worldPos, 1.0f), gMirrorClipPlane);
     
     return o;
 }
@@ -411,6 +417,7 @@ struct GS_PS_BILLBOARD_OUTPUT
     float4 fPosH : SV_POSITION;
     float2 vTex : TEXCOORD;
     float3 vPosW : POSITION;
+    float mirrorClipDistance : SV_ClipDistance0;
 };
 VS_GS_BILLBOARD_OUTPUT VS_GS_Billboard(VS_GS_BILLBOARD_INPUT input)
 {
@@ -455,6 +462,7 @@ void GS_Billboard(point VS_GS_BILLBOARD_OUTPUT input[1],
         o.fPosH = mul(pVertices[i], gmtxView);
         o.fPosH = mul(o.fPosH, gmtxProjection);
         o.vTex = pUVs[i];
+        o.mirrorClipDistance = dot(pVertices[i], gMirrorClipPlane);
         outStream.Append(o);
     }
 }
@@ -501,13 +509,16 @@ struct VS_TRANSFORMED_TEXTURED_OUTPUT
     float4 position : SV_POSITION;
     float2 uv0 : TEXCOORD0;
     float2 uv1 : TEXCOORD1;
+    float mirrorClipDistance : SV_ClipDistance0;
 };
 
 VS_TRANSFORMED_TEXTURED_OUTPUT VSTextureTransform(VS_TRANSFORMED_TEXTURED_INPUT input)
 {
     VS_TRANSFORMED_TEXTURED_OUTPUT output;
 
-    output.position = mul(mul(mul(float4(input.position, 1.0f), gmtxGameObject), gmtxView), gmtxProjection);
+    float4 worldPos = mul(float4(input.position, 1.0f), gmtxGameObject);
+    output.position = mul(mul(worldPos, gmtxView), gmtxProjection);
+    output.mirrorClipDistance = dot(worldPos, gMirrorClipPlane);
     output.uv0 = mul(float3(input.uv, 1.0f), (float3x3) gmtxTextureTransforms[0]).xy;
     output.uv1 = mul(float3(input.uv, 1.0f), (float3x3) gmtxTextureTransforms[1]).xy;
 
@@ -568,23 +579,19 @@ struct VS_OUT
 
 float4 PS_UI_HealthBar(VS_SPRITE_TEXTURED_OUTPUT input) : SV_Target
 {
-    float fUOffset = gmtxTextureTransforms[0][0][0];
-    if (input.uv.x > fUOffset)
-    {
-        discard;
-    }
+    float health = gmtxTextureTransforms[0][0][0];
+    if (input.uv.x >= health) discard;
 
-    return float4(0.0f, 1.0f, 0.0f, 1.0f);
-
-
+    // Ten slanted segments share one continuous health threshold.
+    float segment = frac(input.uv.x * 10.0f + (0.5f - input.uv.y) * 0.15f);
+    if (segment > 0.90f) discard;
+    float light = lerp(1.12f, 0.83f, input.uv.y);
+    return float4(saturate(gMaterial.m_cDiffuse.rgb * light), gMaterial.m_cDiffuse.a);
 }
 
 float4 PS_UI_TextureAtlas(VS_SPRITE_TEXTURED_OUTPUT input) : SV_Target
 {
-    if (input.uv.y < 0.3f || input.uv.y > 0.7f)
-    {
-        discard;
-    }
+    // Atlas cells use their full height; their mesh defines the display size.
     
     float fUOffset = gmtxTextureTransforms[0][0][0]; // _11
     float fVOffset = gmtxTextureTransforms[0][1][0]; // _12
@@ -634,6 +641,7 @@ struct VS_MIRROR_OUTPUT
     float3 tangentW : TANGENT;
     float3 bitangentW : BITANGENT;
     float2 uv : TEXCOORD;
+    float mirrorClipDistance : SV_ClipDistance0;
 };
 
 VS_MIRROR_OUTPUT VSMirror(VS_MIRROR_INPUT input)
@@ -643,6 +651,7 @@ VS_MIRROR_OUTPUT VSMirror(VS_MIRROR_INPUT input)
  
     output.positionW = (float3) mul(float4(input.position, 1.0f), gmtxGameObject);
     output.position = mul(mul(float4(output.positionW, 1.0f), gmtxView), gmtxProjection);
+    output.mirrorClipDistance = 1.0f;
     
     output.uv = input.uv;
     float3 localNormal = float3(0.0f, 0.0f, -1.0f);
@@ -659,6 +668,7 @@ VS_MIRROR_OUTPUT VSMirrorMask(VS_MIRROR_INPUT input)
     
     output.positionW = (float3) mul(float4(input.position, 1.0f), gmtxGameObject);
     output.position = mul(mul(float4(output.positionW, 1.0f), gmtxView), gmtxProjection);
+    output.mirrorClipDistance = 1.0f;
     output.position.z = output.position.w;
    
     output.uv = input.uv;
@@ -686,6 +696,7 @@ VS_STANDARD_OUTPUT VSStandardInstanced(VS_STANDARD_INPUT input, uint instanceID 
     output.bitangentW = normalize(mul(bitangentLocal, (float3x3) instanceWorld));
 
     output.position = mul(mul(float4(output.positionW, 1.0f), gmtxView), gmtxProjection);
+    output.mirrorClipDistance = dot(float4(output.positionW, 1.0f), gMirrorClipPlane);
     output.uv = input.uv;
 
     return output;

@@ -322,7 +322,13 @@ public:
 	void StoreOriginalPosition() {m_xmf3OriginalPosition = GetPosition(); }
 	XMFLOAT3& GetOriginalPosition() { return(m_xmf3OriginalPosition); }
 
-	bool IsCollisionLeaf() const { if (m_ppMeshes && m_nMeshes > 0) return true; if (m_xmLocalOOBB.Extents.x > 0.0f) return true; return false; }
+	bool IsCollisionLeaf() const
+	{
+		if (m_ppMeshes)
+			for (int i = 0; i < m_nMeshes; ++i)
+				if (m_ppMeshes[i]) return true;
+		return m_xmLocalOOBB.Extents.x > 0.0f || m_xmLocalOOBB.Extents.y > 0.0f || m_xmLocalOOBB.Extents.z > 0.0f;
+	}
 
 	void BuildBroadphaseSphere();
 	void CalculateCompositeOOBB();
@@ -447,6 +453,7 @@ public:
 	void Fire(const XMFLOAT3& startPos,const XMFLOAT3& dir,CGameObject* pTarget);
 	
 	bool IsActive() const { return m_bActive; }
+	void Hit(CGameObject* pTarget);
 	void Explode();
 
 private:

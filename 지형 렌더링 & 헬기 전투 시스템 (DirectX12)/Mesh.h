@@ -141,7 +141,7 @@ public:
 class CTexturedRectMesh : public CMesh
 {
 public:
-	CTexturedRectMesh(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, float fWidth=20.0f, float fHeight=20.0f, float fDepth=20.0f, float fxPosition=0.0f, float fyPosition=0.0f, float fzPosition=0.0f);
+	CTexturedRectMesh(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, float fWidth=20.0f, float fHeight=20.0f, float fDepth=20.0f, float fxPosition=0.0f, float fyPosition=0.0f, float fzPosition=0.0f, const XMFLOAT4& xmf4UvRect=XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f));
 	virtual ~CTexturedRectMesh();
 
 protected:

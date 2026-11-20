@@ -1,246 +1,236 @@
 #include "MainMenuScene.h"
-#include"StaticObject.h"
 #include <windowsx.h>
 
-CMainMenuScene::CMainMenuScene() {
-	//NextSceneNum = BattleStage;
-	//ChangeFinishedState();
+namespace
+{
+	constexpr LONG kMenuWidth = 1280;
+	constexpr LONG kMenuHeight = 960;
+	constexpr float kAtlasWidth = 544.0f;
+	constexpr float kAtlasHeight = 112.0f;
 }
-CMainMenuScene::~CMainMenuScene() {}
+
+CMainMenuScene::CMainMenuScene() {}
+CMainMenuScene::~CMainMenuScene() { ReleaseObjects(); }
+
+int CMainMenuScene::HitTestMenu(HWND hWnd, int x, int y) const
+{
+	RECT client = {};
+	if (!::GetClientRect(hWnd, &client) || client.right <= 0 || client.bottom <= 0 ||
+		x < 0 || y < 0 || x >= client.right || y >= client.bottom) return -1;
+
+	// Compare exact scaled coordinates, avoiding rounded hits across an edge.
+	const LONGLONG logicalX = static_cast<LONGLONG>(x) * kMenuWidth;
+	const LONGLONG logicalY = static_cast<LONGLONG>(y) * kMenuHeight;
+	for (int button = 0; button < 2; ++button)
+	{
+		const RECT& rect = m_rcButtons[button];
+		if (logicalX >= static_cast<LONGLONG>(rect.left) * client.right &&
+			logicalX < static_cast<LONGLONG>(rect.right) * client.right &&
+			logicalY >= static_cast<LONGLONG>(rect.top) * client.bottom &&
+			logicalY < static_cast<LONGLONG>(rect.bottom) * client.bottom) return button;
+	}
+	return -1;
+}
+
+void CMainMenuScene::UpdateHoverFromCursor()
+{
+	m_nHoveredButton = -1;
+	if (IsFinshied) return;
+	const HWND foreground = ::GetForegroundWindow();
+	if (!::IsWindow(m_hMenuWindow))
+	{
+		DWORD processId = 0;
+		const DWORD threadId = ::GetWindowThreadProcessId(foreground, &processId);
+		if (processId == ::GetCurrentProcessId() && threadId == ::GetCurrentThreadId())
+			m_hMenuWindow = foreground;
+	}
+	if (!m_hMenuWindow || foreground != m_hMenuWindow) return;
+
+	POINT cursor = {};
+	if (!::GetCursorPos(&cursor)) return;
+	const HWND windowUnderCursor = ::WindowFromPoint(cursor);
+	if (!windowUnderCursor || ::GetAncestor(windowUnderCursor, GA_ROOT) != m_hMenuWindow) return;
+	if (::ScreenToClient(m_hMenuWindow, &cursor))
+		m_nHoveredButton = HitTestMenu(m_hMenuWindow, cursor.x, cursor.y);
+}
 
 bool CMainMenuScene::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam, CCamera* pCamera)
 {
-	switch (nMessageID)
+	m_hMenuWindow = hWnd;
+	if (nMessageID == WM_MOUSELEAVE || nMessageID == WM_CANCELMODE)
 	{
-	case WM_RBUTTONDOWN:
-		if (m_pStartButton==PickObjectPointedByCursor(LOWORD(lParam), HIWORD(lParam), m_pUICamera))
-		{
-			NextSceneNum = BattleStage;
-			ChangeFinishedState(); 
-			return true; 
-		}
-		else if (m_pExitButton == PickObjectPointedByCursor(LOWORD(lParam), HIWORD(lParam), m_pUICamera))
-		{
-			::PostQuitMessage(0);
-			return true;
-		}
-		break;
-	case WM_LBUTTONDOWN:
-		if (m_pStartButton == PickObjectPointedByCursor(LOWORD(lParam), HIWORD(lParam), m_pUICamera))
-		{
-			NextSceneNum = BattleStage;
-			ChangeFinishedState();
-			return true;
-		}
-		else if (m_pExitButton == PickObjectPointedByCursor(LOWORD(lParam), HIWORD(lParam), m_pUICamera))
-		{
-			::PostQuitMessage(0);
-			return true;
-		}
-		break;
+		m_nHoveredButton = -1;
+		return true;
 	}
-	return(false); 
+	if (nMessageID != WM_MOUSEMOVE && nMessageID != WM_LBUTTONDOWN) return false;
+	if (IsFinshied) return true;
+	m_nHoveredButton = HitTestMenu(hWnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+	if (nMessageID == WM_MOUSEMOVE) return true;
+	if (m_nHoveredButton == 0)
+	{
+		NextSceneNum = BattleStage;
+		IsFinshied = true;
+		m_nHoveredButton = -1;
+		return true;
+	}
+	if (m_nHoveredButton == 1)
+	{
+		m_nHoveredButton = -1;
+		::PostQuitMessage(0);
+		return true;
+	}
+	return false;
 }
 
 bool CMainMenuScene::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam)
 {
-
-	switch (nMessageID)
-	{
-	case WM_KEYDOWN:
-		switch (wParam)
-		{
-		case 'W': m_ppGameObjects[0]->MoveForward(+1.0f); break;
-		case 'S': m_ppGameObjects[0]->MoveForward(-1.0f); break;
-		case 'A': m_ppGameObjects[0]->MoveStrafe(-1.0f); break;
-		case 'D': m_ppGameObjects[0]->MoveStrafe(+1.0f); break;
-		case 'Q': m_ppGameObjects[0]->MoveUp(+1.0f); break;
-		case 'R': m_ppGameObjects[0]->MoveUp(-1.0f); break;
-		default:
-			break;
-		}
-		break;
-	default:
-		break;
-	}
-	return(false);
+	return false;
 }
 
 void CMainMenuScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList)
 {
-	m_pd3dGraphicsRootSignature = CreateGraphicsRootSignature(pd3dDevice);
+	IsFinshied = false;
+	m_hMenuWindow = nullptr;
+	m_nHoveredButton = -1;
+	try
+	{
+		m_pd3dGraphicsRootSignature = CreateGraphicsRootSignature(pd3dDevice);
+		m_bOwnRootSignature = true;
+		m_pDescriptorHeap = new CDescriptorHeap();
+		// Leave the existing player resource allowance available to the framework.
+		CreateCbvSrvDescriptorHeaps(pd3dDevice, 200, 73);
 
-	
+		m_pUICamera = new CCamera();
+		m_pUICamera->CreateShaderVariables(pd3dDevice, pd3dCommandList);
+		m_pUICamera->SetViewport(0, 0, kMenuWidth, kMenuHeight, 0.0f, 1.0f);
+		m_pUICamera->SetScissorRect(0, 0, kMenuWidth, kMenuHeight);
+		XMFLOAT4X4 projection;
+		XMStoreFloat4x4(&projection, XMMatrixOrthographicOffCenterLH(
+			0.0f, static_cast<float>(kMenuWidth), 0.0f, static_cast<float>(kMenuHeight), -1.0f, 100.0f));
+		m_pUICamera->SetProjectionMatrix(projection);
+		m_pUICamera->SetViewMatrix(Matrix4x4::Identity());
 
-	m_pDescriptorHeap = new CDescriptorHeap();
-	const int nCbvDescriptors = 200; 
-	const int nSrvDescriptors = 17 + 50 + 1 + 1 + 3 + 1;
+		m_pUIShader = new CUIShader();
+		m_pUIShader->AddRef(); // The scene owns a reference separate from its materials.
+		m_pUIShader->CreateShader(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature);
 
-	CreateCbvSrvDescriptorHeaps(pd3dDevice, nCbvDescriptors, nSrvDescriptors);
+		auto createMaterial = [&](CMaterial*& material, const wchar_t* path)
+		{
+			material = new CMaterial();
+			material->AddRef();
+			material->SetShader(m_pUIShader);
+			CTexture* texture = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
+			material->SetTexture(texture);
+			material->SetMaterialType(MATERIAL_ALBEDO_MAP);
+			texture->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList,
+				const_cast<wchar_t*>(path), RESOURCE_TEXTURE2D, 0);
+			CreateShaderResourceView(pd3dDevice, texture, 0, 3);
+		};
+		createMaterial(m_pCoverMaterial, L"Image/UI/MenuCover.dds");
+		createMaterial(m_pActionsMaterial, L"Image/UI/MenuActions.dds");
 
-	BuildDefaultLightsAndMaterials();
-
-	CreateShaderVariables(pd3dDevice, pd3dCommandList);
-
-	m_pSkyBox = new CSkyBox(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature, this);
-	m_pSkyBox->SetOwnerScene(this);
-	m_pSkyBox->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-
-
-	
-
-
-	m_pUICamera = new CCamera();
-	m_pUICamera->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	float fWidth =  1280.0f;
-	float fHeight = 960.0f;
-
-	m_pUICamera->SetViewport(0, 0, (int)fWidth, (int)fHeight, 0.0f, 1.0f);
-	m_pUICamera->SetScissorRect(0, 0, (int)fWidth, (int)fHeight);
-
-	XMMATRIX xmmtxOrtho = XMMatrixOrthographicOffCenterLH(0.0f, fWidth, 0.0f, fHeight, -1.0f, 100.0f);
-	XMFLOAT4X4 xmf4x4Ortho;
-	XMStoreFloat4x4(&xmf4x4Ortho, xmmtxOrtho);
-
-	m_pUICamera->SetProjectionMatrix(xmf4x4Ortho);
-
-	XMMATRIX mtxView = XMMatrixIdentity();
-	XMFLOAT4X4 xmf4x4View;
-	XMStoreFloat4x4(&xmf4x4View, mtxView);
-	m_pUICamera->SetViewMatrix(xmf4x4View);
-
-	m_pUIShader = new CUIShader();
-	m_pUIShader->CreateShader(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature);
-
-	m_nGameObjects = 2;
-	m_ppGameObjects = new CGameObject * [m_nGameObjects];
-
-	m_pStartButton = new CGameObject(1, 1);
-	m_pStartButton->SetOwnerScene(this);
-	m_pStartButton->m_bSkipFrustum = true;
-	CTexture* pStartTex = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
-	pStartTex->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList, L"Image/UI/StartButton.dds", RESOURCE_TEXTURE2D, 0);
-	
-	CreateShaderResourceView(pd3dDevice, pStartTex, 0, 3);
-
-	CMaterial* pStartMat = new CMaterial();
-	pStartMat->SetShader(m_pUIShader);
-	pStartMat->SetTexture(pStartTex);
-	pStartMat->SetMaterialType(MATERIAL_ALBEDO_MAP);
-	m_pStartButton->SetMaterial(0, pStartMat);
-
-	CTexturedRectMesh* pButtonMesh = new CTexturedRectMesh(pd3dDevice, pd3dCommandList, 200.0f, 50.0f, 0.0f);
-	m_pStartButton->SetMesh(0, pButtonMesh);
-	
-	m_pStartButton->SetPosition(fWidth / 2.0f, fHeight / 2.0f, 0.0f);
-	m_pStartButton->SetScale(1.0f, 5.0f, 1.0f);
-	m_pStartButton->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	m_ppGameObjects[0] = m_pStartButton;
-
-	m_pExitButton = new CGameObject(1, 1);
-	m_pExitButton->SetOwnerScene(this);
-	m_pExitButton->m_bSkipFrustum = true;
-	CTexture* pExitTex = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
-	pExitTex->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList, L"Image/UI/ExitButton.dds", RESOURCE_TEXTURE2D, 0);
-	CreateShaderResourceView(pd3dDevice, pExitTex, 0, 3);
-
-	CMaterial* pExitMat = new CMaterial();
-	pExitMat->SetShader(m_pUIShader);
-	pExitMat->SetTexture(pExitTex);
-	pExitMat->SetMaterialType(MATERIAL_ALBEDO_MAP);
-	m_pExitButton->SetMaterial(0, pExitMat);
-
-	// [수정] CGameObject::SetMesh()가 내부적으로 AddRef()를 호출하므로 여기서 수동으로 또 부르면
-	// 참조 카운트가 실제 소유자 수(2)보다 하나 많아져서(3) 두 버튼이 소멸해도 메시가 절대 삭제되지 않고 누수됨.
-	m_pExitButton->SetMesh(0, pButtonMesh);
-
-	m_pExitButton->SetPosition(fWidth / 2.0f, fHeight / 2.0f+ 100.0f, 0.0f);
-	m_pExitButton->SetScale(1.0f, 5.0f, 1.0f);
-	m_pExitButton->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	m_ppGameObjects[1] = m_pExitButton;
+		// One backdrop and four prebuilt states; only three quads are drawn.
+		m_nGameObjects = 5;
+		m_ppGameObjects = new CGameObject * [m_nGameObjects]();
+		auto createQuad = [&](int index, const RECT& rect, CMaterial* material, const XMFLOAT4& uv)
+		{
+			CGameObject* object = new CGameObject(1, 1);
+			m_ppGameObjects[index] = object;
+			object->SetOwnerScene(this);
+			object->m_bSkipFrustum = true;
+			object->SetMaterial(0, material);
+			object->SetMesh(0, new CTexturedRectMesh(pd3dDevice, pd3dCommandList,
+				static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top),
+				0.0f, 0.0f, 0.0f, 0.0f, uv));
+			object->SetPosition((rect.left + rect.right) * 0.5f,
+				kMenuHeight - (rect.top + rect.bottom) * 0.5f, 0.0f);
+			object->SetTextureTransformParams(XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f));
+			object->CreateShaderVariables(pd3dDevice, pd3dCommandList);
+		};
+		const RECT cover = { 0, 0, kMenuWidth, kMenuHeight };
+		createQuad(0, cover, m_pCoverMaterial, XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f));
+		for (int button = 0; button < 2; ++button)
+		{
+			for (int state = 0; state < 2; ++state)
+			{
+				// V=0 is the top edge of the existing XY rectangle. Keep filtering
+				// within this exact atlas cell, including at fullscreen scale.
+				const XMFLOAT4 uv((state * 272.0f + 0.5f) / kAtlasWidth,
+					(button * 56.0f + 0.5f) / kAtlasHeight, 271.0f / kAtlasWidth, 55.0f / kAtlasHeight);
+				createQuad(1 + button * 2 + state, m_rcButtons[button], m_pActionsMaterial, uv);
+			}
+		}
+	}
+	catch (...)
+	{
+		ReleaseObjects();
+		throw;
+	}
 }
 
 void CMainMenuScene::ReleaseObjects()
 {
-	if (m_pDescriptorHeap) delete m_pDescriptorHeap;
-
-	ReleaseShaderVariables();
-
-	if (m_ppShaders)
-	{
-		for (int i = 0; i < m_nShaders; i++)
-		{
-			m_ppShaders[i]->ReleaseShaderVariables();
-			m_ppShaders[i]->ReleaseObjects();
-			m_ppShaders[i]->Release();
-		}
-		delete[] m_ppShaders;
-	}
-
-	if (m_pSkyBox) delete m_pSkyBox;
-
+	m_nHoveredButton = -1;
+	m_hMenuWindow = nullptr;
+	ReleaseUploadBuffers();
 	if (m_ppGameObjects)
 	{
-		for (int i = 0; i < m_nGameObjects; i++) if (m_ppGameObjects[i]) m_ppGameObjects[i]->Release();
+		for (int i = 0; i < m_nGameObjects; ++i)
+			if (m_ppGameObjects[i]) m_ppGameObjects[i]->Release();
 		delete[] m_ppGameObjects;
-		m_ppGameObjects = nullptr; 
+		m_ppGameObjects = nullptr;
 	}
-	if (m_pUIShader) m_pUIShader->Release();
-	if (m_pUICamera) delete m_pUICamera;
-	if (m_pLights) delete[] m_pLights;
+	m_nGameObjects = 0;
+	// CMaterial's destructor currently releases its texture, but not its shader.
+	for (CMaterial** material : { &m_pCoverMaterial, &m_pActionsMaterial })
+	{
+		if (*material)
+		{
+			(*material)->SetShader(nullptr);
+			(*material)->Release();
+			*material = nullptr;
+		}
+	}
+	if (m_pUIShader) { m_pUIShader->Release(); m_pUIShader = nullptr; }
+	if (m_pUICamera)
+	{
+		m_pUICamera->ReleaseShaderVariables();
+		delete m_pUICamera;
+		m_pUICamera = nullptr;
+	}
+	if (m_pDescriptorHeap) { delete m_pDescriptorHeap; m_pDescriptorHeap = nullptr; }
+	if (m_bOwnRootSignature && m_pd3dGraphicsRootSignature) m_pd3dGraphicsRootSignature->Release();
+	m_pd3dGraphicsRootSignature = nullptr;
+	m_bOwnRootSignature = false;
 }
+
 void CMainMenuScene::ReleaseUploadBuffers()
 {
-	if (m_pTerrain) m_pTerrain->ReleaseUploadBuffers();
-	if (m_pSkyBox) m_pSkyBox->ReleaseUploadBuffers();
-
-	for (int i = 0; i < m_nShaders; i++) m_ppShaders[i]->ReleaseUploadBuffers();
-	for (int i = 0; i < m_nGameObjects; i++) m_ppGameObjects[i]->ReleaseUploadBuffers();
+	if (m_ppGameObjects)
+		for (int i = 0; i < m_nGameObjects; ++i)
+			if (m_ppGameObjects[i]) m_ppGameObjects[i]->ReleaseUploadBuffers();
+	if (m_pCoverMaterial) m_pCoverMaterial->ReleaseUploadBuffers();
+	if (m_pActionsMaterial) m_pActionsMaterial->ReleaseUploadBuffers();
 }
 
-bool CMainMenuScene::ProcessInput(UCHAR* pKeysBuffer)
-{
-	return(false);
-}
+bool CMainMenuScene::ProcessInput(UCHAR* pKeysBuffer) { return true; }
 
 void CMainMenuScene::AnimateObjects(float fTimeElapsed)
 {
-	for (int i = 0; i < m_nShaders; i++) if (m_ppShaders[i]) m_ppShaders[i]->AnimateObjects(fTimeElapsed);
-
-	if (m_pLights)
-	{
-		m_pLights[1].m_xmf3Position = m_pPlayer->GetPosition();
-		m_pLights[1].m_xmf3Direction = m_pPlayer->GetLookVector();
-	}
+	// Window leave/activation messages are not all forwarded by the framework.
+	// Polling also refreshes hover after scene reentry without requiring a move.
+	UpdateHoverFromCursor();
 }
 
 void CMainMenuScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera)
 {
-	if (m_pd3dGraphicsRootSignature) pd3dCommandList->SetGraphicsRootSignature(m_pd3dGraphicsRootSignature);
+	if (!m_ppGameObjects || !m_pUICamera || !m_pUIShader || !m_pDescriptorHeap) return;
+	pd3dCommandList->SetGraphicsRootSignature(m_pd3dGraphicsRootSignature);
 	pd3dCommandList->SetDescriptorHeaps(1, &m_pDescriptorHeap->m_pd3dCbvSrvDescriptorHeap);
-
-	pCamera->SetViewportsAndScissorRects(pd3dCommandList);
-	pCamera->UpdateShaderVariables(pd3dCommandList);
-
-	UpdateShaderVariables(pd3dCommandList);
-
-	D3D12_GPU_VIRTUAL_ADDRESS d3dcbLightsGpuVirtualAddress = m_pd3dcbLights->GetGPUVirtualAddress();
-	pd3dCommandList->SetGraphicsRootConstantBufferView(2, d3dcbLightsGpuVirtualAddress); //Lights
-	if (m_pSkyBox) m_pSkyBox->Render(pd3dCommandList, pCamera);
-
-	
-	
-	for (int i = 0; i < m_nShaders; i++) if (m_ppShaders[i]) m_ppShaders[i]->Render(pd3dCommandList, pCamera);
-
-	if (m_pUICamera)
-	{
-		m_pUICamera->SetViewportsAndScissorRects(pd3dCommandList);
-		m_pUICamera->UpdateShaderVariables(pd3dCommandList);
-	}
-	if (m_pUIShader)
-	{
-		m_pUIShader->Render(pd3dCommandList, m_pUICamera);
-	}
-	for (int i = 0; i < m_nGameObjects; i++) if (m_ppGameObjects[i]) m_ppGameObjects[i]->Render(pd3dCommandList, pCamera);
+	m_pUICamera->SetViewportsAndScissorRects(pd3dCommandList);
+	m_pUICamera->UpdateShaderVariables(pd3dCommandList);
+	m_pUIShader->Render(pd3dCommandList, m_pUICamera);
+	m_ppGameObjects[0]->Render(pd3dCommandList, m_pUICamera);
+	for (int button = 0; button < 2; ++button)
+		m_ppGameObjects[1 + button * 2 + (m_nHoveredButton == button ? 1 : 0)]->Render(pd3dCommandList, m_pUICamera);
 }
-

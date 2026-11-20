@@ -12,8 +12,18 @@ bool CBattleScene::OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM w
 	{
 	case WM_LBUTTONDOWN:
 	{
-		CGameObject* pPicked = PickObjectPointedByCursor((int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam), pCamera);
-		if (pPicked)
+        if (!pCamera) break;
+        int x = static_cast<short>(LOWORD(lParam));
+        int y = static_cast<short>(HIWORD(lParam));
+        RECT client = {};
+        if (hWnd && GetClientRect(hWnd, &client) && client.right > 0 && client.bottom > 0)
+        {
+            const D3D12_VIEWPORT viewport = pCamera->GetViewport();
+            x = MulDiv(x, static_cast<int>(viewport.Width), client.right);
+            y = MulDiv(y, static_cast<int>(viewport.Height), client.bottom);
+        }
+        CGameObject* pPicked = PickObjectPointedByCursor(x, y, pCamera);
+        if (pPicked && pPicked->GetLayer() == EObjectLayer::Enemy && pPicked->GetHealth() > 0)
 		{
 			OutputDebugStringA("BattleScene: Lock-on target picked!\n");
 			m_pCurrentLockOnTarget = pPicked;
@@ -33,12 +43,6 @@ bool CBattleScene::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARA
 	case WM_KEYDOWN:
 		switch (wParam)
 		{
-		case 'W': m_pPlayer->MoveForward(+1.0f); break;
-		case 'S': m_pPlayer->MoveForward(-1.0f); break;
-		case 'A': m_pPlayer->MoveStrafe(-1.0f); break;
-		case 'D': m_pPlayer->MoveStrafe(+1.0f); break;
-		case 'Q': m_pPlayer->MoveUp(+1.0f); break;
-		case 'R': m_pPlayer->MoveUp(-1.0f); break;
 		case VK_SPACE: 
 			if (m_pPlayer) {
 				FirePlayerMissile();
@@ -62,130 +66,11 @@ bool CBattleScene::OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARA
 	return(false);
 }
 
-void CBattleScene::BuildUIObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList)
-{
-	float fWidth = (float)FRAME_BUFFER_WIDTH;
-	float fHeight = (float)FRAME_BUFFER_HEIGHT;
-	m_pUIShader = new CUIShader();
-	m_pUIShader->CreateShader(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature);
-	m_pUIShader->AddRef(); 
-
-	CShader* pHealthBarShader = new CHealthBarShader();
-	pHealthBarShader->CreateShader(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature);
-
-	CTexture* pUITexture = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
-	pUITexture->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList, L"Image/UI/HPBar01.dds", RESOURCE_TEXTURE2D, 0);
-
-	CreateShaderResourceView(pd3dDevice, pUITexture, 0, 3); 
-
-	m_pUIMaterial = new CMaterial();
-	m_pUIMaterial->SetShader(m_pUIShader);
-	m_pUIMaterial->SetTexture(pUITexture);
-	m_pUIMaterial->SetMaterialType(MATERIAL_ALBEDO_MAP);
-	m_pUIMaterial->AddRef(); 
-
-	CMaterial* pHealthBarMaterial = new CMaterial();
-	pHealthBarMaterial->SetShader(pHealthBarShader); 
-	pHealthBarMaterial->SetTexture(pUITexture); 
-
-
-	CGameObject* pHealthBarBG = new CGameObject(1, 1);
-	pHealthBarBG->SetOwnerScene(this);
-	CTexturedRectMesh* pBgMesh = new CTexturedRectMesh(pd3dDevice, pd3dCommandList, 300.0f, 30.0f, 0.0f, 0.0f, 0.0f, +1.0f);
-	pHealthBarBG->SetMesh(0, pBgMesh); 
-	pHealthBarBG->m_bSkipFrustum = true;
-
-	pHealthBarBG->SetMaterial(0, m_pUIMaterial);
-	pHealthBarBG->SetScale(1.5f, 0.8f, 1.0f);
-	pHealthBarBG->SetPosition(fWidth / 2.0f,  10.0f, 0.0f);
-	pHealthBarBG->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	m_vpUIObjects.push_back(pHealthBarBG);
-
-
-	CGameObject* pHealthBarFG = new CGameObject(1, 1);
-	strcpy_s(pHealthBarFG->m_pstrFrameName, 64, "HealthBarFG");
-	pHealthBarFG->SetOwnerScene(this);
-	CTexturedRectMesh* pFgMesh = new CTexturedRectMesh(pd3dDevice, pd3dCommandList, 429.0f, 8.0f, 0.0f, 0.0f, 0.0f, +1.0f);
-	pHealthBarFG->SetMesh(0, pFgMesh); 
-	pHealthBarFG->m_bSkipFrustum = true;
-	pHealthBarFG->SetMaterial(0, pHealthBarMaterial); 
-	pHealthBarFG->SetPosition(fWidth / 2.0f+10.0f, 6.0f, 0.0f);
-	pHealthBarFG->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	m_vpUIObjects.push_back(pHealthBarFG);
-
-
-	m_pTextureAtlasShader = new CUITextureAtlasShader();
-	m_pTextureAtlasShader->CreateShader(pd3dDevice, pd3dCommandList, m_pd3dGraphicsRootSignature);
-	m_pTextureAtlasShader->AddRef();
-
-	CTexture* pNumberTexture = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
-	pNumberTexture->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList, L"Image/UI/Font.dds", RESOURCE_TEXTURE2D, 0);
-	CreateShaderResourceView(pd3dDevice, pNumberTexture, 0, 3);
-
-	m_pScoreMaterial = new CMaterial();
-	m_pScoreMaterial->SetShader(m_pTextureAtlasShader);
-	m_pScoreMaterial->SetTexture(pNumberTexture); 
-	m_pScoreMaterial->SetMaterialType(MATERIAL_ALBEDO_MAP);
-	m_pScoreMaterial->AddRef();
-
-
-	float fDigitWidth = 32.0f; 
-	float fDigitHeight = 80.0f; 
-
-	float fStartX = fWidth - (fDigitWidth * 6) - 20.0f;
-	float fStartY = 24.0f;
-
-	m_vpScoreDigits.reserve(6);
-	for (int i = 0; i < 6; ++i)
-	{
-		CGameObject* pDigit = new CGameObject(1, 1);
-		pDigit->SetOwnerScene(this);
-		CTexturedRectMesh* pDigitMesh = new CTexturedRectMesh(pd3dDevice, pd3dCommandList, fDigitWidth, fDigitHeight, 0.0f, 0.0f, 0.0f, +1.0f);
-		pDigit->SetMesh(0, pDigitMesh);
-		pDigit->m_bSkipFrustum = true;
-		pDigit->SetMaterial(0, m_pScoreMaterial);
-		pDigit->SetTextureTransformParams(XMFLOAT4(0.0f, 0.4f, 0.2f, 0.5f));
-		pDigit->SetPosition(fStartX + (i * fDigitWidth) + (fDigitWidth * 0.5f), fStartY, 0.0f);
-		pDigit->SetScale(1.0f, 1.7f, 1.0f);
-		pDigit->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-
-		m_vpUIObjects.push_back(pDigit);
-		m_vpScoreDigits.push_back(pDigit);
-	}
-
-	CShader* pCrossShader = m_pUIShader;
-	CTexture* pCrossTex = new CTexture(1, RESOURCE_TEXTURE2D, 0, 1);
-	pCrossTex->LoadTextureFromDDSFile(pd3dDevice, pd3dCommandList,L"Image/UI/HiarCross.dds", RESOURCE_TEXTURE2D, 0);
-
-	CreateShaderResourceView(pd3dDevice, pCrossTex, 0, 3);
-
-	CMaterial* pCrossMat = new CMaterial();
-	pCrossMat->SetShader(pCrossShader);
-	pCrossMat->SetTexture(pCrossTex);
-	pCrossMat->SetMaterialType(MATERIAL_ALBEDO_MAP);
-
-	CGameObject* pCrossHair = new CGameObject(1, 1);
-	pCrossHair->SetOwnerScene(this);
-	pCrossHair->m_bSkipFrustum = true;
-
-	float size = 40.0f;
-	CTexturedRectMesh* pCrossMesh =new CTexturedRectMesh(pd3dDevice, pd3dCommandList,size, size, 0.0f, 0.0f, 0.0f, +1.0f);
-	pCrossHair->SetMesh(0, pCrossMesh);
-	pCrossHair->SetMaterial(0, pCrossMat);
-	pCrossHair->SetPosition(fWidth * 0.5f, fHeight * 0.5f, 0.0f);
-	pCrossHair->SetScale(10.0f, 10.0f, 10.0f);
-	pCrossHair->CreateShaderVariables(pd3dDevice, pd3dCommandList);
-	strcpy_s(pCrossHair->m_pstrFrameName, 64, "CrossHair");
-	m_vpUIObjects.push_back(pCrossHair);
-}
-
-
-
 void CBattleScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList)
 {
 	m_pd3dGraphicsRootSignature = CreateGraphicsRootSignature(pd3dDevice);
 	m_pDescriptorHeap = new CDescriptorHeap();
-	const int nCbvDescriptors = 200; 
+	const int nCbvDescriptors = 200;
 	const int nSrvDescriptors = 256;
 	CreateCbvSrvDescriptorHeaps(pd3dDevice, nCbvDescriptors, nSrvDescriptors);
 
@@ -247,7 +132,7 @@ void CBattleScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandL
 	CTexturedRectMesh* pMirrorMesh =
 		new CTexturedRectMesh(pd3dDevice, pd3dCommandList,
 			400.0f, 300.0f,
-			0.0f, 0.0f, 0.0f, -1.0f);
+			0.0f, 0.0f, 0.0f, 0.0f);
 	m_pMirror->SetMesh(0, pMirrorMesh);
 	CMaterial* pMirrorMaterial = new CMaterial();
 	pMirrorMaterial->SetShader(m_pMirrorShader);
@@ -309,7 +194,16 @@ void CBattleScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandL
 		{
 			m_pMissileModel->m_bSkipFrustum = true;
 			m_pMissileModel->SetScale(20.0f, 20.0f, 20.0f);
-			m_pMissileModel->SetPosition(-90.0f, -50.0f, 0.0f);
+			// Cancel the exported child pivot after scale; the missile tail is the launch origin.
+			if (m_pMissileModel->m_pChild)
+			{
+				const XMFLOAT4X4& childTransform = m_pMissileModel->m_pChild->m_xmf4x4Transform;
+				XMVECTOR childOrigin = XMVectorSet(childTransform._41, childTransform._42, childTransform._43, 1.0f);
+				XMFLOAT3 scaledOffset;
+				XMStoreFloat3(&scaledOffset, XMVector3TransformNormal(childOrigin,
+					XMLoadFloat4x4(&m_pMissileModel->m_xmf4x4Transform)));
+				m_pMissileModel->SetPosition(-scaledOffset.x, -scaledOffset.y, -scaledOffset.z);
+			}
 			m_pMissileModel->IsSetLocalOOBBFromMesh = true;
 			m_pMissileModel->SetLayer(EObjectLayer::PlayerBullet);
 			m_pMissileModel->BuildBroadphaseSphere();
@@ -318,28 +212,18 @@ void CBattleScene::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandL
 		pMissile->SetOwnerScene(this);
 		if (m_pMissileModel)
 		{
-			pMissile->m_xmLocalOOBB = m_pMissileModel->m_xmLocalOOBB;
-			pMissile->m_xmLocalSphere = m_pMissileModel->m_xmLocalSphere;
-			pMissile->m_xmBigOOGG = m_pMissileModel->m_xmBigOOGG;
-			pMissile->IsSetLocalOOBBFromMesh = m_pMissileModel->IsSetLocalOOBBFromMesh;
-
-			if (m_pMissileModel->m_ppMeshes && m_pMissileModel->m_ppMeshes[0])
-			{
-				pMissile->SetMesh(0, m_pMissileModel->m_ppMeshes[0]);
-			}
-			if (m_pMissileModel->m_nMaterials > 0 && m_pMissileModel->m_ppMaterials[0])
-				pMissile->SetMaterial(0, m_pMissileModel->m_ppMaterials[0]);
-			if (m_pMissileModel->m_pChild)
-			{
-				pMissile->SetChild(m_pMissileModel);
-			}
+			pMissile->SetChild(m_pMissileModel);
+			// The root has no mesh; transform its aggregate bounds into the wrapper's local space.
+			m_pMissileModel->m_xmBigOOGG.Transform(pMissile->m_xmBigOOGG,
+				XMLoadFloat4x4(&m_pMissileModel->m_xmf4x4Transform));
 		}
 		pMissile->m_bSkipFrustum = true;
 		pMissile->IsSetLocalOOBBFromMesh = true;
 		pMissile->SetLayer(EObjectLayer::PlayerBullet);
 		pMissile->BuildBroadphaseSphere();
+		pMissile->UpdateTransform(nullptr);
 		pMissile->SetCollidable(false);
-		pMissile->bRender = true;
+		pMissile->bRender = false;
 
 		pMissile->CreateShaderVariables(pd3dDevice, pd3dCommandList);
 
@@ -406,14 +290,16 @@ void CBattleScene::FirePlayerMissile()
 
 	XMFLOAT3 fireDir = look;
 
-	CGameObject* pTarget = nullptr;
-	if (m_pCurrentLockOnTarget &&
-		m_pCurrentLockOnTarget->GetLayer() == EObjectLayer::Enemy)
-	{
-		pTarget = m_pCurrentLockOnTarget;
-	}
-	
+	CGameObject* pTarget = GetLiveLockTarget();
 
+	// Aim from the muzzle toward the camera-center point, accounting for camera offset.
+	XMFLOAT3 aimPoint = Vector3::Add(firePos, Vector3::ScalarProduct(look, 1500.0f, false));
+	if (pTarget)
+		 aimPoint = pTarget->GetPosition();
+	else if (CCamera* camera = m_pPlayer->GetCamera())
+		 aimPoint = Vector3::Add(camera->GetPosition(), Vector3::ScalarProduct(camera->GetLookVector(), 1500.0f, false));
+	XMFLOAT3 toAim = Vector3::Subtract(aimPoint, firePos);
+	if (Vector3::Length(toAim) > EPSILON) fireDir = Vector3::Normalize(toAim);
 	pMissile->Fire(firePos, fireDir, pTarget);
 	m_CollisionValue.InsertObjectToGridByAABB(pMissile);
 }
@@ -452,17 +338,27 @@ void CBattleScene::ReleaseObjects()
 
 	for (auto& pUIObject : m_vpUIObjects)
 	{
-		if (pUIObject) pUIObject->Release();
+		if (!pUIObject) continue;
+		// CMaterial does not release its shader; shared materials are cleared only once.
+		if (pUIObject->m_ppMaterials)
+		{
+			for (int i = 0; i < pUIObject->m_nMaterials; ++i)
+				if (pUIObject->m_ppMaterials[i]) pUIObject->m_ppMaterials[i]->SetShader(nullptr);
+		}
+		pUIObject->Release();
 	}
 	m_vpUIObjects.clear();
-	m_vpScoreDigits.clear();
+	m_radarContacts.clear();
+	m_pCurrentLockOnTarget = nullptr;
+	m_pTargetDisplayTracked = nullptr;
+	m_fHudTime = 0.0f;
 
 
-	if (m_pUIMaterial) m_pUIMaterial->Release();
-	if (m_pScoreMaterial) m_pScoreMaterial->Release();
+	if (m_pUIMaterial) { m_pUIMaterial->Release(); m_pUIMaterial = nullptr; }
+	if (m_pScoreMaterial) { m_pScoreMaterial->Release(); m_pScoreMaterial = nullptr; }
 
-	if (m_pUIShader) m_pUIShader->Release();
-	if (m_pTextureAtlasShader) m_pTextureAtlasShader->Release();
+	if (m_pUIShader) { m_pUIShader->Release(); m_pUIShader = nullptr; }
+	if (m_pTextureAtlasShader) { m_pTextureAtlasShader->Release(); m_pTextureAtlasShader = nullptr; }
 
 	if (m_pBillboardShader)
 	{
@@ -474,6 +370,7 @@ void CBattleScene::ReleaseObjects()
 
 	if (m_pUICamera)
 	{
+		m_pUICamera->ReleaseShaderVariables();
 		delete m_pUICamera;
 		m_pUICamera = NULL;
 	}
@@ -586,7 +483,7 @@ void CBattleScene::AnimateObjects(float fTimeElapsed)
 	for (auto* pMissile : m_vPlayerMissiles)
 	{
 		if (!pMissile) continue;
-		if (!pMissile->bRender) continue;
+		if (!pMissile->IsActive()) continue;
 
 		pMissile->Animate(fTimeElapsed);
 		m_CollisionValue.UpdateDynamicObjectInGrid(pMissile);
@@ -608,41 +505,7 @@ void CBattleScene::AnimateObjects(float fTimeElapsed)
 			m_nScore = 0;
 	}
 
-	int nScore = m_nScore;
-	const float fUWidth = 0.1f;
-	const float fVHeight = 1.0f;
-
-	for (int i = 5; i >= 0; --i)
-	{
-		if (m_vpScoreDigits.empty()) break;
-
-		CGameObject* pDigitObject = m_vpScoreDigits[i];
-		int digit = nScore % 10;
-		nScore /= 10;
-
-		float fUOffset = digit * fUWidth;
-		float fVOffset = 0.0f;
-
-		pDigitObject->SetTextureTransformParams(
-			XMFLOAT4(fUOffset, fVOffset, fUWidth, fVHeight)
-		);
-		pDigitObject->bRender = true;
-	}
-
-	for (auto& pUIObject : m_vpUIObjects)
-	{
-		if (!pUIObject) continue;
-
-		if (m_pPlayer && strcmp(pUIObject->m_pstrFrameName, "HealthBarFG") == 0)
-		{
-			float fHealthPercent = static_cast<float>(m_pPlayer->GetHealth()) / m_pPlayer->GetMaxHealth();
-			if (fHealthPercent < 0.0f) fHealthPercent = 0.0f;
-			if (fHealthPercent > 1.0f) fHealthPercent = 1.0f;
-			pUIObject->SetTextureTransformParams(XMFLOAT4(fHealthPercent, 0.0f, 0.0f, 0.0f));
-		}
-		pUIObject->Animate(fTimeElapsed, NULL);
-		pUIObject->UpdateTransform(NULL);
-	}
+	UpdateBattleHud(fTimeElapsed);
 
 	if (m_ppExplosionShaders) m_ppExplosionShaders->AnimateObjects(fTimeElapsed);
 }
@@ -786,7 +649,7 @@ void CBattleScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* p
 	for (auto* pMissile : m_vPlayerMissiles)
 	{
 		if (!pMissile) continue;
-		if (!pMissile->bRender) continue;
+		if (!pMissile->IsActive()) continue;
 
 		pMissile->Render(pd3dCommandList, pCamera);
 	}
@@ -810,13 +673,11 @@ void CBattleScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* p
 		if (m_pMirror->m_ppMeshes && m_pMirror->m_ppMeshes[0])
 			m_pMirror->m_ppMeshes[0]->Render(pd3dCommandList, 0);
 	}
-	// [????] ??? ???ея??? ????? ????? ??????? ????? ???? ????? ??? ????????.
-	// (??????? ??? ??ии(1)?? ????? ?????? D3D12_CLEAR_FLAG_DEPTH?? ??????? ????? ???? ????? ???? ????.)
-	// ????? ??? ????? ??? ??еъ??? ????????(?б└???? ??)?? ??? ?????? ???ех??? ?????? ????? ???????.
-	if (m_pMirror && m_pMirrorShader)
+	// Reset depth only inside the visible mirror stencil; preserve the rest of the scene.
+	if (m_pMirror && m_pMirrorShader && m_pMirror->m_ppMeshes && m_pMirror->m_ppMeshes[0])
 	{
-		D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = gGameFramework.GetMainDsvHandle();
-		pd3dCommandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		m_pMirrorShader->Render(pd3dCommandList, pCamera, CMirrorShader::MIRROR_DEPTH_RESET_PSO);
+		m_pMirror->m_ppMeshes[0]->Render(pd3dCommandList, 0);
 	}
 	pd3dCommandList->OMSetStencilRef(1);
 	if (m_pMirror && m_pMirrorShader)
@@ -836,32 +697,18 @@ void CBattleScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* p
 		pCamera->SetViewMatrix(xmf4x4ReflectedView);
 		pCamera->SetPosition(xmf3ReflectedPos);
 
-		XMVECTOR vMirrorPlaneWorld = XMLoadFloat4(&XMFLOAT4(
-			m_pMirror->m_xmf3PlaneNormal.x,
-			m_pMirror->m_xmf3PlaneNormal.y,
-			m_pMirror->m_xmf3PlaneNormal.z,
-			m_pMirror->m_fPlaneD
-		));
-
-		XMMATRIX V_Reflected = XMLoadFloat4x4(&xmf4x4ReflectedView);
-		XMMATRIX P_Original = XMLoadFloat4x4(&xmf4x4OrigProj);
-
-		// [????] MakeObliqueProjectionMatrix()?? OpenGL ???(clip z ???? [-1,1])?? ?????? ????????,
-		// ?? ????????? ??? D3D LH ????????(clip z ???? [0,1])??? ???? ????? ??ве?.
-		// ????? ????? ??? ??????ех??? NDC z?? 1?? ??? ? ?????? ?????(???б└??? ????? ?????)
-		// GPU ?????ея??? ???ех??? ??? ??????????, "??б╠ ?????? ?? ?????" ?????? ???? ??????.
-		// (MakeObliqueProjectionMatrix ????? D3D [0,1] ????? ?б╞? ??? ????????? ????? ??? ???? ?? ????.)
-		XMMATRIX V_Reflected_InvT = XMMatrixTranspose(XMMatrixInverse(NULL, V_Reflected));
-		XMVECTOR vMirrorPlaneView = XMPlaneTransform(vMirrorPlaneWorld, V_Reflected_InvT);
-		(void)vMirrorPlaneView; // ????? ?????? ??????? ????? ????? ??
-
 		pCamera->SetProjectionMatrix(xmf4x4OrigProj);
 		pCamera->UpdateFrustum();
 
-		VS_CB_CAMERA_INFO mirrorData;
+		VS_CB_CAMERA_INFO mirrorData = {};
 		XMStoreFloat4x4(&mirrorData.m_xmf4x4View, XMMatrixTranspose(XMLoadFloat4x4(&xmf4x4ReflectedView)));
 		XMStoreFloat4x4(&mirrorData.m_xmf4x4Projection, XMMatrixTranspose(XMLoadFloat4x4(&xmf4x4OrigProj)));
 		mirrorData.m_xmf3Position = pCamera->GetPosition();
+		XMVECTOR clipPlane = XMVectorSet(m_pMirror->m_xmf3PlaneNormal.x,
+			m_pMirror->m_xmf3PlaneNormal.y, m_pMirror->m_xmf3PlaneNormal.z, m_pMirror->m_fPlaneD);
+		if (XMVectorGetX(XMPlaneDotCoord(clipPlane, XMLoadFloat3(&xmf3OrigPos))) < 0.0f)
+			clipPlane = XMVectorNegate(clipPlane);
+		XMStoreFloat4(&mirrorData.m_xmf4ClipPlane, clipPlane);
 		::memcpy(m_pcbMappedMirrorParams, &mirrorData, sizeof(VS_CB_CAMERA_INFO));
 		D3D12_GPU_VIRTUAL_ADDRESS cbvMirrorAddress = m_pd3dcbMirrorParams->GetGPUVirtualAddress();
 		pd3dCommandList->SetGraphicsRootConstantBufferView(0, cbvMirrorAddress);
@@ -881,9 +728,9 @@ void CBattleScene::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* p
 		for (auto* pMissile : m_vPlayerMissiles)
 		{
 			if (!pMissile) continue;
-			if (!pMissile->bRender) continue;
+			if (!pMissile->IsActive()) continue;
 			
-			pMissile->Render(pd3dCommandList, pCamera,1);
+			pMissile->Render(pd3dCommandList, pCamera, false, 1);
 		}
 		if (m_pPlayer) m_pPlayer->Render(pd3dCommandList, pCamera, 1);
 		pCamera->SetPosition(xmf3OrigPos);
@@ -952,16 +799,10 @@ void CBattleScene::RenderOverlay(ID3D12GraphicsCommandList* pd3dCommandList, CCa
 		m_pUICamera->SetViewportsAndScissorRects(pd3dCommandList);
 		m_pUICamera->UpdateShaderVariables(pd3dCommandList);
 
-		for (auto& pUIObject : m_vpUIObjects)
-		{
-			if (pUIObject && strcmp(pUIObject->m_pstrFrameName, "CrossHair") == 0)
-			{
-				if (!pCamera || pCamera->GetMode() == THIRD_PERSON_CAMERA)
-					continue;
-			}
-
-			if (pUIObject)
-				pUIObject->Render(pd3dCommandList, m_pUICamera);
-		}
+        UpdateTargetDisplay(pCamera);
+        for (auto* object : m_vpUIObjects)
+        {
+            if (object->bRender) object->Render(pd3dCommandList, m_pUICamera);
+        }
 	}
 }

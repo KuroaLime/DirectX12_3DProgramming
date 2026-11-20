@@ -3,8 +3,6 @@
 // File: CGameTimer.h
 //-----------------------------------------------------------------------------
 
-const ULONG MAX_SAMPLE_COUNT = 50; // Maximum frame time sample count
-
 class CGameTimer
 {
 public:
@@ -32,8 +30,6 @@ private:
 
 	__int64							m_nPerformanceFrequencyPerSec;				
 
-    float							m_fFrameTime[MAX_SAMPLE_COUNT];
-    ULONG							m_nSampleCount;
 
     unsigned long					m_nCurrentFrameRate;				
 	unsigned long					m_nFramesPerSecond;					

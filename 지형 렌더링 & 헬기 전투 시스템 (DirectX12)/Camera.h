@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #define ASPECT_RATIO				(float(FRAME_BUFFER_WIDTH) / float(FRAME_BUFFER_HEIGHT))
 
 #define FIRST_PERSON_CAMERA			0x01
@@ -11,7 +13,12 @@ struct VS_CB_CAMERA_INFO
 	XMFLOAT4X4						m_xmf4x4View;
 	XMFLOAT4X4						m_xmf4x4Projection;
 	XMFLOAT3						m_xmf3Position;
+	float m_fPadding;
+	XMFLOAT4 m_xmf4ClipPlane; // HLSL cbCameraInfo c9 (byte offset 144).
 };
+
+static_assert(offsetof(VS_CB_CAMERA_INFO, m_xmf4ClipPlane) == 144, "Camera clip plane must match HLSL c9.");
+static_assert(sizeof(VS_CB_CAMERA_INFO) == 160, "Unexpected camera constant-buffer layout.");
 
 class CPlayer;
 

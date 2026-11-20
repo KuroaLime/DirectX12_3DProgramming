@@ -1,4 +1,5 @@
 #include "TopographyShader.h"
+#include <stdexcept>
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -48,94 +49,114 @@ D3D12_SHADER_BYTECODE CTerrainShader::CreateDomainShader()
 void CTerrainShader::CreateShader(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList, ID3D12RootSignature* pd3dGraphicsRootSignature)
 {
 	m_nPipelineStates = 3;
-	m_ppd3dPipelineStates = new ID3D12PipelineState * [m_nPipelineStates];
-	m_ppd3dPipelineStates[0] = nullptr;
-	m_ppd3dPipelineStates[1] = nullptr;
+	m_ppd3dPipelineStates = new ID3D12PipelineState * [m_nPipelineStates]();
+	D3D12_INPUT_LAYOUT_DESC d3dInputLayoutDesc = {};
 
-	D3D12_INPUT_LAYOUT_DESC d3dInputLayoutDesc = CreateInputLayout();
-
-	ZeroMemory(&m_d3dPipelineStateDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
-	m_d3dPipelineStateDesc.pRootSignature = pd3dGraphicsRootSignature;
-
-	m_d3dPipelineStateDesc.VS = CreateVertexShader();
-	m_d3dPipelineStateDesc.HS = CreateHullShader();
-	m_d3dPipelineStateDesc.DS = CreateDomainShader();
-	m_d3dPipelineStateDesc.PS = CreatePixelShader();
-
-	if (!m_d3dPipelineStateDesc.VS.pShaderBytecode || !m_d3dPipelineStateDesc.HS.pShaderBytecode ||
-		!m_d3dPipelineStateDesc.DS.pShaderBytecode || !m_d3dPipelineStateDesc.PS.pShaderBytecode)
+	auto releaseBuildResources = [&]()
 	{
-		OutputDebugStringA("ERROR: One or more Terrain Shaders failed to compile!\n");
-		return;
-	}
-
-	m_d3dPipelineStateDesc.RasterizerState = CreateRasterizerState();
-	m_d3dPipelineStateDesc.BlendState = CreateBlendState();
-	m_d3dPipelineStateDesc.DepthStencilState = CreateDepthStencilState();
-	m_d3dPipelineStateDesc.InputLayout = d3dInputLayoutDesc;
-	m_d3dPipelineStateDesc.SampleMask = UINT_MAX;
-
-	m_d3dPipelineStateDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
-
-	m_d3dPipelineStateDesc.NumRenderTargets = 1;
-	m_d3dPipelineStateDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-	m_d3dPipelineStateDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	m_d3dPipelineStateDesc.SampleDesc.Count = 1;
-	m_d3dPipelineStateDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-
-	HRESULT hResult = pd3dDevice->CreateGraphicsPipelineState(
-		&m_d3dPipelineStateDesc,
-		__uuidof(ID3D12PipelineState),
-		(void**)&m_ppd3dPipelineStates[0]);
-	if (FAILED(hResult))
-	{
-		OutputDebugStringA("ERROR: Failed to create Terrain PSO!\n");
-		return;
-	}
-
-
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC d3dReflectPSODesc = m_d3dPipelineStateDesc;
-
-	d3dReflectPSODesc.DepthStencilState.DepthEnable = TRUE;
-	d3dReflectPSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-	d3dReflectPSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-
-	d3dReflectPSODesc.DepthStencilState.StencilEnable = TRUE;
-	d3dReflectPSODesc.DepthStencilState.StencilReadMask = 0xFF;
-	d3dReflectPSODesc.DepthStencilState.StencilWriteMask = 0x00;
-
-	d3dReflectPSODesc.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_EQUAL;
-	d3dReflectPSODesc.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
-	d3dReflectPSODesc.DepthStencilState.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
-	d3dReflectPSODesc.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
-	d3dReflectPSODesc.DepthStencilState.BackFace = d3dReflectPSODesc.DepthStencilState.FrontFace;
-
-	d3dReflectPSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-
-	hResult = pd3dDevice->CreateGraphicsPipelineState(
-		&d3dReflectPSODesc,
-		__uuidof(ID3D12PipelineState),
-		(void**)&m_ppd3dPipelineStates[1]);
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC d3dWireDesc = m_d3dPipelineStateDesc;
-	d3dWireDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
-	d3dWireDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-
-	HRESULT hr = pd3dDevice->CreateGraphicsPipelineState(&d3dWireDesc, __uuidof(ID3D12PipelineState), (void**)&m_ppd3dPipelineStates[2]);
-	if (FAILED(hr))
-	{
-		OutputDebugStringA("ERROR: Failed to create Terrain PSO[2] wireframe!\n");
-		m_ppd3dPipelineStates[2] = m_ppd3dPipelineStates[0];
-	}
-
-	if (m_pd3dVertexShaderBlob)   m_pd3dVertexShaderBlob->Release();
-	if (m_pd3dHullShaderBlob)     m_pd3dHullShaderBlob->Release();
-	if (m_pd3dDomainShaderBlob)   m_pd3dDomainShaderBlob->Release();
-	if (m_pd3dPixelShaderBlob)    m_pd3dPixelShaderBlob->Release();
-
-	if (d3dInputLayoutDesc.pInputElementDescs)
+		if (m_pd3dVertexShaderBlob) { m_pd3dVertexShaderBlob->Release(); m_pd3dVertexShaderBlob = nullptr; }
+		if (m_pd3dHullShaderBlob) { m_pd3dHullShaderBlob->Release(); m_pd3dHullShaderBlob = nullptr; }
+		if (m_pd3dDomainShaderBlob) { m_pd3dDomainShaderBlob->Release(); m_pd3dDomainShaderBlob = nullptr; }
+		if (m_pd3dPixelShaderBlob) { m_pd3dPixelShaderBlob->Release(); m_pd3dPixelShaderBlob = nullptr; }
 		delete[] d3dInputLayoutDesc.pInputElementDescs;
+		d3dInputLayoutDesc = {};
+	};
+	auto requireShader = [](const D3D12_SHADER_BYTECODE& bytecode, const char* name)
+	{
+		if (!bytecode.pShaderBytecode || !bytecode.BytecodeLength)
+		{
+			char message[256];
+			sprintf_s(message, "CTerrainShader: %s compile returned no bytecode; see the shader compiler diagnostic.", name);
+			throw std::runtime_error(message);
+		}
+	};
+	auto requirePipeline = [](HRESULT result, const char* name)
+	{
+		if (FAILED(result))
+		{
+			char message[256];
+			sprintf_s(message, "CTerrainShader: CreateGraphicsPipelineState failed for %s (HRESULT=0x%08lX).",
+				name, static_cast<unsigned long>(result));
+			throw std::runtime_error(message);
+		}
+	};
+
+	try
+	{
+		d3dInputLayoutDesc = CreateInputLayout();
+		ZeroMemory(&m_d3dPipelineStateDesc, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC));
+		m_d3dPipelineStateDesc.pRootSignature = pd3dGraphicsRootSignature;
+		m_d3dPipelineStateDesc.VS = CreateVertexShader();
+		requireShader(m_d3dPipelineStateDesc.VS, "VSTerrain");
+		m_d3dPipelineStateDesc.HS = CreateHullShader();
+		requireShader(m_d3dPipelineStateDesc.HS, "HSTerrain");
+		m_d3dPipelineStateDesc.DS = CreateDomainShader();
+		requireShader(m_d3dPipelineStateDesc.DS, "DSTerrain");
+		m_d3dPipelineStateDesc.PS = CreatePixelShader();
+		requireShader(m_d3dPipelineStateDesc.PS, "PSTerrain");
+
+		m_d3dPipelineStateDesc.RasterizerState = CreateRasterizerState();
+		m_d3dPipelineStateDesc.BlendState = CreateBlendState();
+		m_d3dPipelineStateDesc.DepthStencilState = CreateDepthStencilState();
+		m_d3dPipelineStateDesc.InputLayout = d3dInputLayoutDesc;
+		m_d3dPipelineStateDesc.SampleMask = UINT_MAX;
+		m_d3dPipelineStateDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+		m_d3dPipelineStateDesc.NumRenderTargets = 1;
+		m_d3dPipelineStateDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		m_d3dPipelineStateDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		m_d3dPipelineStateDesc.SampleDesc.Count = 1;
+		m_d3dPipelineStateDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+		HRESULT hResult = pd3dDevice->CreateGraphicsPipelineState(
+			&m_d3dPipelineStateDesc, __uuidof(ID3D12PipelineState),
+			(void**)&m_ppd3dPipelineStates[0]);
+		requirePipeline(hResult, "regular terrain PSO[0]");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC d3dReflectPSODesc = m_d3dPipelineStateDesc;
+		d3dReflectPSODesc.DepthStencilState.DepthEnable = TRUE;
+		d3dReflectPSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+		d3dReflectPSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+		d3dReflectPSODesc.DepthStencilState.StencilEnable = TRUE;
+		d3dReflectPSODesc.DepthStencilState.StencilReadMask = 0xFF;
+		d3dReflectPSODesc.DepthStencilState.StencilWriteMask = 0x00;
+		d3dReflectPSODesc.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_EQUAL;
+		d3dReflectPSODesc.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+		d3dReflectPSODesc.DepthStencilState.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+		d3dReflectPSODesc.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+		d3dReflectPSODesc.DepthStencilState.BackFace = d3dReflectPSODesc.DepthStencilState.FrontFace;
+		d3dReflectPSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		hResult = pd3dDevice->CreateGraphicsPipelineState(
+			&d3dReflectPSODesc, __uuidof(ID3D12PipelineState),
+			(void**)&m_ppd3dPipelineStates[1]);
+		requirePipeline(hResult, "reflected terrain PSO[1]");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC d3dWireDesc = m_d3dPipelineStateDesc;
+		d3dWireDesc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+		d3dWireDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		hResult = pd3dDevice->CreateGraphicsPipelineState(
+			&d3dWireDesc, __uuidof(ID3D12PipelineState),
+			(void**)&m_ppd3dPipelineStates[2]);
+		if (FAILED(hResult))
+		{
+			char message[256];
+			sprintf_s(message, "CTerrainShader: optional wireframe PSO[2] failed (HRESULT=0x%08lX); using regular terrain.\n",
+				static_cast<unsigned long>(hResult));
+			OutputDebugStringA(message);
+			m_ppd3dPipelineStates[2] = m_ppd3dPipelineStates[0];
+			m_ppd3dPipelineStates[2]->AddRef();
+		}
+	}
+	catch (...)
+	{
+		releaseBuildResources();
+		for (int i = 0; i < m_nPipelineStates; ++i)
+			if (m_ppd3dPipelineStates[i]) m_ppd3dPipelineStates[i]->Release();
+		delete[] m_ppd3dPipelineStates;
+		m_ppd3dPipelineStates = nullptr;
+		m_nPipelineStates = 0;
+		throw;
+	}
+	releaseBuildResources();
 }
 
 

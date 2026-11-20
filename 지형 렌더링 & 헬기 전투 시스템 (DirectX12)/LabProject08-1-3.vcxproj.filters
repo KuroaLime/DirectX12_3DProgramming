@@ -137,6 +137,15 @@
     <ClCompile Include="BattleScene.cpp">
       <Filter>소스 파일\Scene</Filter>
     </ClCompile>
+    <ClCompile Include="FlightDisplay.cpp">
+      <Filter>소스 파일\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="TargetDisplay.cpp">
+      <Filter>소스 파일\Scene</Filter>
+    </ClCompile>
+    <ClCompile Include="BattleHud.cpp">
+      <Filter>소스 파일\Scene</Filter>
+    </ClCompile>
     <ClCompile Include="MainMenuShader.cpp">
       <Filter>소스 파일\Shader</Filter>
     </ClCompile>

@@ -175,7 +175,8 @@ public:
 	{
 		MIRROR_MASK_PSO = 0,    // 1) 스텐실에 마스크만 찍을 때
 		MIRROR_REFLECT_PSO = 1, // 2) 반사된 세상 그릴 때
-		MIRROR_GLASS_PSO = 2    // 3) 유리 표면(알파 블렌딩) 그릴 때
+		MIRROR_GLASS_PSO = 2,    // 3) 유리 표면(알파 블렌딩) 그릴 때
+		MIRROR_DEPTH_RESET_PSO = 3
 	};
 
 public:

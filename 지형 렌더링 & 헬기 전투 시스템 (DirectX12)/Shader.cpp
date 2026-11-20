@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "Shader.h"
 #include "Scene.h"
+#include <stdexcept>
 
 CShader::CShader()
 {
@@ -429,10 +430,7 @@ CObjectsShader::~CObjectsShader()
 
 float Random(float fMin, float fMax)
 {
-	float fRandomValue = (float)rand();
-	if (fRandomValue < fMin) fRandomValue = fMin;
-	if (fRandomValue > fMax) fRandomValue = fMax;
-	return(fRandomValue);
+	return fMin + (fMax - fMin) * Random();
 }
 
 float Random()
@@ -629,7 +627,7 @@ void CMirrorShader::CreateShader(ID3D12Device* pd3dDevice,
 	ID3D12GraphicsCommandList* pd3dCommandList,
 	ID3D12RootSignature* pd3dGraphicsRootSignature)
 {
-	m_nPipelineStates = 3;
+	m_nPipelineStates = 4;
 	m_ppd3dPipelineStates = new ID3D12PipelineState * [m_nPipelineStates];
 	for (int i = 0; i < m_nPipelineStates; ++i) m_ppd3dPipelineStates[i] = nullptr;
 
@@ -676,6 +674,36 @@ void CMirrorShader::CreateShader(ID3D12Device* pd3dDevice,
 			(void**)&m_ppd3dPipelineStates[MIRROR_MASK_PSO]);
 	}
 
+	// Reset depth only where the visible mirror marked the stencil buffer.
+	// The original scene depth outside the mirror must survive for later draws.
+	{
+		desc = m_d3dPipelineStateDesc;
+		ID3DBlob* pd3dDepthResetVertexShader = nullptr;
+		desc.VS = CShader::CompileShaderFromFile(L"Shaders.hlsl", "VSMirrorMask", "vs_5_1", &pd3dDepthResetVertexShader);
+		desc.PS = {};
+		desc.DepthStencilState.DepthEnable = TRUE;
+		desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+		desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+		desc.DepthStencilState.StencilEnable = TRUE;
+		desc.DepthStencilState.StencilReadMask = 0xFF;
+		desc.DepthStencilState.StencilWriteMask = 0x00;
+		desc.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_EQUAL;
+		desc.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+		desc.DepthStencilState.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+		desc.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+		desc.DepthStencilState.BackFace = desc.DepthStencilState.FrontFace;
+		desc.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+		desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		HRESULT hr = pd3dDevice->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_ppd3dPipelineStates[MIRROR_DEPTH_RESET_PSO]));
+		if (pd3dDepthResetVertexShader) pd3dDepthResetVertexShader->Release();
+		if (FAILED(hr))
+		{
+			char message[128];
+			sprintf_s(message, "Mirror depth reset pipeline creation failed (HRESULT=0x%08lX).", static_cast<unsigned long>(hr));
+			throw std::runtime_error(message);
+		}
+	}
+
 	// -----------------------------
 	// -----------------------------
 	{
@@ -710,7 +738,9 @@ void CMirrorShader::CreateShader(ID3D12Device* pd3dDevice,
 		desc = m_d3dPipelineStateDesc;
 
 		desc.DepthStencilState.DepthEnable = TRUE;
-		desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		// Replace reflected-camera depths with the real mirror surface depth.
+		desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+		desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 		desc.DepthStencilState.StencilEnable = TRUE;
 		desc.DepthStencilState.StencilReadMask = 0xFF;
 		desc.DepthStencilState.StencilWriteMask = 0x00;
@@ -732,7 +762,7 @@ void CMirrorShader::CreateShader(ID3D12Device* pd3dDevice,
 		blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
 		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 		desc.BlendState = blendDesc;
-		desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+		desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 		HRESULT hr = pd3dDevice->CreateGraphicsPipelineState(
 			&desc, __uuidof(ID3D12PipelineState),
 			(void**)&m_ppd3dPipelineStates[MIRROR_GLASS_PSO]);

@@ -1,5 +1,7 @@
 #include "BattleShader.h"
 #include "Scene.h"
+#include "StaticObject.h"
+#include <algorithm>
 #include <random>
 CBattleShader::CBattleShader()
 {
@@ -145,7 +147,17 @@ void CBattleShader::RenderShadowInstanced(ID3D12GraphicsCommandList* pd3dCommand
 }
 void CBattleShader::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList, ID3D12RootSignature* pd3dGraphicsRootSignature, void* pContext, CScene* pOwnerScene)
 {
-	m_nObjects = 10;
+	// World-space X/Z centers. The first three are along the opening flight path.
+	static constexpr XMFLOAT2 spawnCentersXZ[] = {
+		{ 720.0f, 1730.0f }, { 1230.0f, 1850.0f }, { 1540.0f, 2390.0f },
+		{ 550.0f, 540.0f }, { 2280.0f, 450.0f }, { 3900.0f, 700.0f },
+		{ 3730.0f, 2100.0f },
+		{ 600.0f, 3720.0f }, { 2250.0f, 3610.0f }, { 3920.0f, 3850.0f }
+	};
+	constexpr float spawnJitter = 60.0f;
+	constexpr float terrainClearance = 150.0f;
+	CHeightMapTerrain* terrain = pOwnerScene ? pOwnerScene->m_pTerrain : nullptr;
+	m_nObjects = _countof(spawnCentersXZ);
 	m_ppObjects = new CGameObject * [m_nObjects];
 
 	m_pMi24Model = CGameObject::LoadGeometryFromFile(pd3dDevice, pd3dCommandList, pd3dGraphicsRootSignature, "Model/Mi24.bin", this, pOwnerScene);
@@ -158,15 +170,14 @@ void CBattleShader::BuildObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommand
 		m_pModelMainRotor = m_pMi24Model->FindFrame("Top_Rotor");
 		m_pModelTailRotor = m_pMi24Model->FindFrame("Tail_Rotor");
 	}
-	float fMapMinX = 100.0f, fMapMaxX = 1900.0f;
-	float fMapMinZ = 100.0f, fMapMaxZ = 1900.0f;
 	for (int i = 0; i < m_nObjects; i++)
 	{
 		CMi24Object* pObject = new CMi24Object(pd3dDevice, pd3dCommandList, pd3dGraphicsRootSignature);
 
-		float x = Random(fMapMinX, fMapMaxX);
-		float z = Random(fMapMinZ, fMapMaxZ);
-		float y = Random(800.0f, 1000.0f);
+		const float x = spawnCentersXZ[i].x + Random(-spawnJitter, spawnJitter);
+		const float z = spawnCentersXZ[i].y + Random(-spawnJitter, spawnJitter);
+		const float cruiseAltitude = Random(910.0f, 950.0f);
+		const float y = terrain ? std::max(cruiseAltitude, terrain->GetHeight(x, z) + terrainClearance) : cruiseAltitude;
 		if (pOwnerScene) pObject->SetOwnerScene(pOwnerScene);
 
 		pObject->SetPosition(x, y, z);

@@ -41,17 +41,23 @@ CCollisionAlogrithm::CCollisionAlogrithm(float cellSize) : m_fCellSize(cellSize)
 
 void CCollisionAlogrithm::ClearGrid() {
 	for (auto& KeyValue : m_Grid)
+	{
+		for (CGameObject* obj : KeyValue.second.objects)
+			if (obj) obj->m_CurrentGridCells.clear();
 		KeyValue.second.objects.clear();
+	}
+	m_PendingGridRemovals.clear();
 }
 
 
 void CCollisionAlogrithm::UpdateDynamicObjectInGrid(CGameObject* obj) {
-
-	BoundingOrientedBox worldBigOOBB;
-	XMMATRIX xmmtxWorld = XMLoadFloat4x4(&obj->m_xmf4x4World);
-	obj->m_xmBigOOGG.Transform(worldBigOOBB, xmmtxWorld);
-
-	BoundingBox newAABB = GetWorldAABBFromOOBB(worldBigOOBB);
+	if (!obj) return;
+	if (!obj->IsCollidable())
+	{
+		RemoveObjectFromGrid(obj);
+		return;
+	}
+	BoundingBox newAABB = GetWorldAABBFromObject(obj);
 
 	std::unordered_set<Cellkey, CellKeyHasher> newKeySet;
 	int minX = static_cast<int>(floorf((newAABB.Center.x - newAABB.Extents.x) / m_fCellSize));
@@ -100,7 +106,7 @@ void CCollisionAlogrithm::UpdateDynamicObjectInGrid(CGameObject* obj) {
 }
 
 void CCollisionAlogrithm::CheckCollision() {
-
+	m_bCheckingCollisions = true;
 
 	std::unordered_set<GameObjectPair, PairHasher> checkedPairs;
 
@@ -125,6 +131,7 @@ void CCollisionAlogrithm::CheckCollision() {
 
 			for (size_t j = i + 1; j < n; ++j)
 			{
+				if (!a->IsCollidable()) break;
 				CGameObject* b = objs[j];
 
 				if (!b || !b->IsCollidable()) continue;
@@ -139,15 +146,17 @@ void CCollisionAlogrithm::CheckCollision() {
 						
 						XMVECTOR mtv;
 						if (GetPreciseIntersectionInfo(a, b, mtv))
-							if (a->bRender && b->bRender)
-							{
-								OnCollision(a, b, mtv);
-							}
+						{
+							OnCollision(a, b, mtv);
+						}
 					}
 				}
 			}
 		}
 	}
+	m_bCheckingCollisions = false;
+	for (CGameObject* obj : m_PendingGridRemovals) RemoveObjectFromGrid(obj);
+	m_PendingGridRemovals.clear();
 }
 
 
@@ -166,7 +175,22 @@ BoundingBox CCollisionAlogrithm::GetWorldAABBFromOOBB(const BoundingOrientedBox&
 	BoundingBox::CreateFromPoints(aabb,8,corners,sizeof(XMFLOAT3));
 	return aabb;
 }
-void CCollisionAlogrithm::InsertObjectToGridByAABB(CGameObject* obj) {
+BoundingBox CCollisionAlogrithm::GetWorldAABBFromObject(CGameObject* obj) const
+{
+	BoundingOrientedBox worldBounds = obj->m_xmWorldOOBB;
+	if (obj->m_pChild)
+		obj->m_xmBigOOGG.Transform(worldBounds, XMLoadFloat4x4(&obj->m_xmf4x4World));
+	return GetWorldAABBFromOOBB(worldBounds);
+}
+
+void CCollisionAlogrithm::RemoveObjectFromGrid(CGameObject* obj)
+{
+	if (!obj) return;
+	if (m_bCheckingCollisions)
+	{
+		m_PendingGridRemovals.insert(obj);
+		return;
+	}
 	for (const auto& key : obj->m_CurrentGridCells)
 	{
 		auto it = m_Grid.find(key);
@@ -180,10 +204,14 @@ void CCollisionAlogrithm::InsertObjectToGridByAABB(CGameObject* obj) {
 		}
 	}
 
-	obj->m_CurrentGridCells.clear(); //
+	obj->m_CurrentGridCells.clear();
+}
 
-	BoundingBox aabb = GetWorldAABBFromOOBB(obj->m_xmWorldOOBB);
-	InsertObjectToGridByAABB_Internal(obj, aabb);
+void CCollisionAlogrithm::InsertObjectToGridByAABB(CGameObject* obj) {
+	if (!obj) return;
+	RemoveObjectFromGrid(obj);
+	if (!obj->IsCollidable()) return;
+	InsertObjectToGridByAABB_Internal(obj, GetWorldAABBFromObject(obj));
 }
 void CCollisionAlogrithm::InsertObjectToGridByAABB_Internal(CGameObject* obj,const BoundingBox& aabb) {
 	int minX = static_cast<int>(floorf((aabb.Center.x - aabb.Extents.x) / m_fCellSize));

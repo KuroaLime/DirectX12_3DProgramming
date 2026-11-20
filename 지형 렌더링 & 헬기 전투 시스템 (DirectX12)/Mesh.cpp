@@ -84,7 +84,7 @@ BOOL CMesh::CheckRayIntersectionOOBB(XMVECTOR& xmvPickRayOrigin, XMVECTOR& xmvPi
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-CTexturedRectMesh::CTexturedRectMesh(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, float fWidth, float fHeight, float fDepth, float fxPosition, float fyPosition, float fzPosition) : CMesh(pd3dDevice, pd3dCommandList)
+CTexturedRectMesh::CTexturedRectMesh(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, float fWidth, float fHeight, float fDepth, float fxPosition, float fyPosition, float fzPosition, const XMFLOAT4& xmf4UvRect) : CMesh(pd3dDevice, pd3dCommandList)
 {
 	m_nVertices = 6;
 	m_d3dPrimitiveTopology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -144,6 +144,13 @@ CTexturedRectMesh::CTexturedRectMesh(ID3D12Device *pd3dDevice, ID3D12GraphicsCom
 		m_pxmf3Positions[3] = XMFLOAT3(+fx, -fy, fz); m_pxmf2TextureCoords0[3] = XMFLOAT2(1.0f, 1.0f);
 		m_pxmf3Positions[4] = XMFLOAT3(+fx, +fy, fz); m_pxmf2TextureCoords0[4] = XMFLOAT2(1.0f, 0.0f);
 		m_pxmf3Positions[5] = XMFLOAT3(-fx, +fy, fz); m_pxmf2TextureCoords0[5] = XMFLOAT2(0.0f, 0.0f);
+	}
+
+	// Crop transparent texture padding without enlarging the button geometry.
+	for (int i = 0; i < m_nVertices; ++i)
+	{
+		m_pxmf2TextureCoords0[i].x = xmf4UvRect.x + m_pxmf2TextureCoords0[i].x * xmf4UvRect.z;
+		m_pxmf2TextureCoords0[i].y = xmf4UvRect.y + m_pxmf2TextureCoords0[i].y * xmf4UvRect.w;
 	}
 
 	m_pd3dPositionBuffer = ::CreateBufferResource(pd3dDevice, pd3dCommandList, m_pxmf3Positions, sizeof(XMFLOAT3) * m_nVertices, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, &m_pd3dPositionUploadBuffer);

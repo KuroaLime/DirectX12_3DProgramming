@@ -88,7 +88,7 @@ class CScene
 {
 public:
     CScene();
-    ~CScene();
+    virtual ~CScene();
 
 	virtual bool OnProcessingMouseMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam, CCamera* pCamera);
 	virtual bool OnProcessingKeyboardMessage(HWND hWnd, UINT nMessageID, WPARAM wParam, LPARAM lParam);
@@ -105,6 +105,7 @@ public:
 	ID3D12RootSignature *GetGraphicsRootSignature() { return(m_pd3dGraphicsRootSignature); }
 
 	virtual bool ProcessInput(UCHAR *pKeysBuffer);
+	virtual bool UsesPlayerControls() const { return true; }
 	virtual void AnimateObjects(float fTimeElapsed);
 	virtual void Render(ID3D12GraphicsCommandList *pd3dCommandList, CCamera *pCamera=NULL);
 
@@ -180,7 +181,7 @@ public:
 	CShader* m_pUIShader = NULL;
 	CCamera* m_pUICamera = NULL;
 	std::vector<CGameObject*> m_vpUIObjects;
-	CMaterial* m_pUIMaterial;
+	CMaterial* m_pUIMaterial = nullptr;
 	virtual void BuildUIObjects(ID3D12Device* pd3dDevice, ID3D12GraphicsCommandList* pd3dCommandList) {};
 
 	virtual void RenderOverlay(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera = NULL) {}

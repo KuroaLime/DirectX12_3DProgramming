@@ -15,7 +15,9 @@ CGameTimer::CGameTimer()
 	m_nPausedPerformanceCounter = 0;
 	m_nStopPerformanceCounter = 0;
 
-	m_nSampleCount = 0;
+	m_fTimeElapsed = 0.0f;
+	m_bStopped = false;
+	m_nCurrentPerformanceCounter = m_nLastPerformanceCounter;
 	m_nCurrentFrameRate = 0;
 	m_nFramesPerSecond = 0;
 	m_fFPSTimeElapsed = 0.0f;
@@ -48,12 +50,6 @@ void CGameTimer::Tick(float fLockFPS)
 
 	m_nLastPerformanceCounter = m_nCurrentPerformanceCounter;
 
-    if (fabsf(fTimeElapsed - m_fTimeElapsed) < 1.0f)
-    {
-        ::memmove(&m_fFrameTime[1], m_fFrameTime, (MAX_SAMPLE_COUNT - 1) * sizeof(float));
-        m_fFrameTime[0] = fTimeElapsed;
-        if (m_nSampleCount < MAX_SAMPLE_COUNT) m_nSampleCount++;
-    }
 
 	m_nFramesPerSecond++;
 	m_fFPSTimeElapsed += fTimeElapsed;
@@ -64,9 +60,9 @@ void CGameTimer::Tick(float fLockFPS)
 		m_fFPSTimeElapsed = 0.0f;
 	} 
 
-    m_fTimeElapsed = 0.0f;
-    for (ULONG i = 0; i < m_nSampleCount; i++) m_fTimeElapsed += m_fFrameTime[i];
-    if (m_nSampleCount > 0) m_fTimeElapsed /= m_nSampleCount;
+    // Use this frame's elapsed time for simulation, not the FPS display average.
+    // Cap stalls/debugger pauses so a single update cannot jump across the scene.
+    m_fTimeElapsed = (fTimeElapsed < 0.1f) ? fTimeElapsed : 0.1f;
 }
 
 unsigned long CGameTimer::GetFrameRate(LPTSTR lpszString, int nCharacters) 
@@ -98,6 +94,12 @@ void CGameTimer::Reset()
 
 	m_nBasePerformanceCounter = nPerformanceCounter;
 	m_nLastPerformanceCounter = nPerformanceCounter;
+	m_nCurrentPerformanceCounter = nPerformanceCounter;
+	m_nPausedPerformanceCounter = 0;
+	m_fTimeElapsed = 0.0f;
+	m_fFPSTimeElapsed = 0.0f;
+	m_nFramesPerSecond = 0;
+	m_nCurrentFrameRate = 0;
 	m_nStopPerformanceCounter = 0;
 	m_bStopped = false;
 }

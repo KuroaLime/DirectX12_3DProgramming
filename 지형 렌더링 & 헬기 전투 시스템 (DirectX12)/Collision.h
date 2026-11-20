@@ -72,6 +72,7 @@ public:
 
 	void ClearGrid();
 	void InsertObjectToGridByAABB(CGameObject* obj);
+	void RemoveObjectFromGrid(CGameObject* obj);
 	void UpdateDynamicObjectInGrid(CGameObject* obj);
 
 	void CheckCollision();
@@ -87,9 +88,12 @@ public:
 private:
 	float m_fCellSize;
 	std::unordered_map<Cellkey, SpatialCell, CellKeyHasher> m_Grid;
+	bool m_bCheckingCollisions = false;
+	std::unordered_set<CGameObject*> m_PendingGridRemovals;
 
 	Cellkey GetCellKey(const XMFLOAT3& pos) const;
 	DirectX::BoundingBox GetWorldAABBFromOOBB(const DirectX::BoundingOrientedBox& oobb) const;
+	DirectX::BoundingBox GetWorldAABBFromObject(CGameObject* obj) const;
 
 	void InsertObjectToGridByAABB_Internal(CGameObject* obj,
 		const DirectX::BoundingBox& aabb);

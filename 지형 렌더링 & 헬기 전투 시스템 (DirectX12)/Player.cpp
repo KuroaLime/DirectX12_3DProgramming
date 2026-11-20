@@ -62,34 +62,30 @@ void CPlayer::ReleaseShaderVariables()
 
 void CPlayer::Move(DWORD dwDirection, float fDistance, bool bUpdateVelocity)
 {
-	if (dwDirection)
-	{
-		XMFLOAT3 xmf3Shift = XMFLOAT3(0, 0, 0);
-		if (dwDirection & DIR_FORWARD) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Look, fDistance);
-		if (dwDirection & DIR_BACKWARD) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Look, -fDistance);
-		if (dwDirection & DIR_RIGHT) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Right, fDistance);
-		if (dwDirection & DIR_LEFT) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Right, -fDistance);
-		if (dwDirection & DIR_UP) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Up, fDistance);
-		if (dwDirection & DIR_DOWN) xmf3Shift = Vector3::Add(xmf3Shift, m_xmf3Up, -fDistance);
+    XMFLOAT3 direction(0.0f, 0.0f, 0.0f);
+    if (dwDirection & DIR_FORWARD) direction = Vector3::Add(direction, m_xmf3Look);
+    if (dwDirection & DIR_BACKWARD) direction = Vector3::Add(direction, m_xmf3Look, -1.0f);
+    if (dwDirection & DIR_RIGHT) direction = Vector3::Add(direction, m_xmf3Right);
+    if (dwDirection & DIR_LEFT) direction = Vector3::Add(direction, m_xmf3Right, -1.0f);
+    if (dwDirection & DIR_UP) direction = Vector3::Add(direction, m_xmf3Up);
+    if (dwDirection & DIR_DOWN) direction = Vector3::Add(direction, m_xmf3Up, -1.0f);
 
-		Move(xmf3Shift, bUpdateVelocity);
-	}
+    // Multiple held axes share one acceleration budget.
+    if (Vector3::Length(direction) > 0.0f)
+        Move(Vector3::ScalarProduct(direction, fDistance, true), bUpdateVelocity);
 }
 
 void CPlayer::Move(const XMFLOAT3& xmf3Shift, bool bUpdateVelocity)
 {
-	if (bUpdateVelocity)
-	{
-		m_xmf3Velocity = Vector3::Add(m_xmf3Velocity, xmf3Shift);
-		CGameObject::SetPosition(m_xmf3Position);
-	}
-	else
-	{
-
-		m_xmf3Position = Vector3::Add(m_xmf3Position, xmf3Shift);
-		CGameObject::SetPosition(m_xmf3Position);
-		m_pCamera->Move(xmf3Shift);
-	}
+    if (bUpdateVelocity)
+    {
+        m_xmf3Velocity = Vector3::Add(m_xmf3Velocity, xmf3Shift);
+    }
+    else
+    {
+        m_xmf3Position = Vector3::Add(m_xmf3Position, xmf3Shift);
+        CGameObject::SetPosition(m_xmf3Position.x, m_xmf3Position.y, m_xmf3Position.z);
+    }
 }
 
 void CPlayer::Rotate(float x, float y, float z)
@@ -154,7 +150,8 @@ void CPlayer::Rotate(float x, float y, float z)
 
 void CPlayer::Update(float fTimeElapsed)
 {
-	m_xmf3Velocity = Vector3::Add(m_xmf3Velocity, m_xmf3Gravity);
+	if (fTimeElapsed <= 0.0f) return;
+	m_xmf3Velocity = Vector3::Add(m_xmf3Velocity, m_xmf3Gravity, fTimeElapsed);
 	float fLength = sqrtf(m_xmf3Velocity.x * m_xmf3Velocity.x + m_xmf3Velocity.z * m_xmf3Velocity.z);
 	float fMaxVelocityXZ = m_fMaxVelocityXZ;
 	if (fLength > m_fMaxVelocityXZ)
@@ -172,33 +169,8 @@ void CPlayer::Update(float fTimeElapsed)
 	if (m_pPlayerUpdatedContext) OnPlayerUpdateCallback(fTimeElapsed);
 	OnPrepareRender();
 
-	// ================== 여기부터 카메라 세팅 ==================
-	DWORD nCurrentCameraMode = m_pCamera->GetMode();
-	if (m_pCamera)
-	{
-		XMFLOAT4X4 xmf4x4Rotate = Matrix4x4::Identity();
+	// Camera placement is finalized after scene collision resolution.
 
-		XMFLOAT3 xmf3Right = m_xmf3Right;
-		XMFLOAT3 xmf3Up = m_xmf3Up;
-		XMFLOAT3 xmf3Look = m_xmf3Look;
-
-		xmf4x4Rotate._11 = xmf3Right.x; xmf4x4Rotate._21 = xmf3Up.x; xmf4x4Rotate._31 = xmf3Look.x;
-		xmf4x4Rotate._12 = xmf3Right.y; xmf4x4Rotate._22 = xmf3Up.y; xmf4x4Rotate._32 = xmf3Look.y;
-		xmf4x4Rotate._13 = xmf3Right.z; xmf4x4Rotate._23 = xmf3Up.z; xmf4x4Rotate._33 = xmf3Look.z;
-
-		// 카메라가 들고 있는 기본 오프셋 (예: {0, 15, -30})
-		XMFLOAT3 camOffset = m_pCamera->GetOffset();
-		XMFLOAT3 worldOffset = Vector3::TransformCoord(camOffset, xmf4x4Rotate);
-		XMFLOAT3 camPos = Vector3::Add(m_xmf3Position, worldOffset);
-
-		m_pCamera->SetPosition(camPos);
-		m_pCamera->SetLookAt(m_xmf3Position); // 항상 플레이어를 바라보게
-	}
-
-	if (m_pCameraUpdatedContext) OnCameraUpdateCallback(fTimeElapsed);
-	m_pCamera->RegenerateViewMatrix();
-
-	// 마찰 처리
 	fLength = Vector3::Length(m_xmf3Velocity);
 
 	// 입력이 있으면 기존 마찰(m_fFriction), 없으면 정지 마찰(m_fStopFriction)
@@ -270,49 +242,39 @@ void CPlayer::OnPrepareRender()
 }
 void CPlayer::SetPosition(float x, float y, float z)
 {
-	// 1. [유지] CPlayer의 내부 위치(m_xmf3Position)를 갱신합니다.
-	m_xmf3Position = XMFLOAT3(x, y, z);
-
-	// 2. [수정] 카메라의 위치도 '즉시' 갱신합니다.
-	if (m_pCamera)
-	{
-		XMFLOAT3 xmf3NewCameraPos = m_xmf3Position;
-
-		// [신규] 3인칭 카메라인 경우, 플레이어의 방향을 기준으로 오프셋을 적용한 위치로 즉시 이동시킵니다.
-		if (m_pCamera->GetMode() == THIRD_PERSON_CAMERA)
-		{
-			// CThirdPersonCamera::Update()의 핵심 로직을 가져와 
-			// 플레이어의 현재 방향(Right/Up/Look)을 기준으로 오프셋을 계산합니다.
-			XMFLOAT4X4 xmf4x4Rotate = Matrix4x4::Identity();
-			XMFLOAT3 xmf3Right = GetRight(); // Player's Right
-			XMFLOAT3 xmf3Up = GetUp();       // Player's Up
-			XMFLOAT3 xmf3Look = GetLook();   // Player's Look
-			xmf4x4Rotate._11 = xmf3Right.x; xmf4x4Rotate._21 = xmf3Up.x; xmf4x4Rotate._31 = xmf3Look.x;
-			xmf4x4Rotate._12 = xmf3Right.y; xmf4x4Rotate._22 = xmf3Up.y; xmf4x4Rotate._32 = xmf3Look.y;
-			xmf4x4Rotate._13 = xmf3Right.z; xmf4x4Rotate._23 = xmf3Up.z; xmf4x4Rotate._33 = xmf3Look.z;
-
-			// 카메라의 로컬 오프셋을 플레이어의 회전(xmf4x4Rotate)에 맞게 변환
-			XMFLOAT3 xmf3Offset = Vector3::TransformCoord(m_pCamera->GetOffset(), xmf4x4Rotate);
-			// 새 카메라 위치 = 플레이어 위치 + 변환된 오프셋
-			xmf3NewCameraPos = Vector3::Add(m_xmf3Position, xmf3Offset);
-		}
-		// (1인칭/우주선 카메라는 플레이어 위치와 동일하게 설정 - 기존 로직)
-
-		// CCamera::SetPosition()은 CCamera의 m_xmf3Position을 즉시 설정합니다.
-		m_pCamera->SetPosition(xmf3NewCameraPos);
-	}
-
-	// 3. [유지] 부모 CGameObject::SetPosition을 호출합니다.
-	//    (이 함수가 m_xmf4x4Transform을 갱신하고 UpdateTransform(NULL)을 호출함)
-	CGameObject::SetPosition(x, y, z);
+    m_xmf3Position = XMFLOAT3(x, y, z);
+    CGameObject::SetPosition(x, y, z);
 }
 
-// [신규] CPlayer::SetPosition (XMFLOAT3)
 void CPlayer::SetPosition(XMFLOAT3 xmf3Position)
 {
-	// 위에서 구현한 SetPosition(x, y, z) 함수를 호출합니다.
-	SetPosition(xmf3Position.x, xmf3Position.y, xmf3Position.z);
+    SetPosition(xmf3Position.x, xmf3Position.y, xmf3Position.z);
 }
+
+void CPlayer::UpdateCamera(float fTimeElapsed, bool bSnap)
+{
+    if (!m_pCamera) return;
+
+    if (m_pCamera->GetMode() == THIRD_PERSON_CAMERA && !bSnap)
+    {
+        m_pCamera->Update(m_xmf3Position, fTimeElapsed);
+    }
+    else
+    {
+        const XMFLOAT3 offset = m_pCamera->GetOffset();
+        XMFLOAT3 position = Vector3::Add(m_xmf3Position, m_xmf3Right, offset.x);
+        position = Vector3::Add(position, m_xmf3Up, offset.y);
+        position = Vector3::Add(position, m_xmf3Look, offset.z);
+        m_pCamera->SetPosition(position);
+        if (m_pCamera->GetMode() == THIRD_PERSON_CAMERA)
+            m_pCamera->SetLookAt(m_xmf3Position);
+    }
+
+    if (m_pCameraUpdatedContext) OnCameraUpdateCallback(fTimeElapsed);
+    m_pCamera->RegenerateViewMatrix();
+    m_pCamera->UpdateFrustum();
+}
+
 void CPlayer::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamera, int nPipelineState)
 {
 	DWORD nCameraMode = (pCamera) ? pCamera->GetMode() : 0x00;
@@ -351,16 +313,16 @@ void CPlayer::Render(ID3D12GraphicsCommandList* pd3dCommandList, CCamera* pCamer
 CAirplanePlayer::CAirplanePlayer(ID3D12Device *pd3dDevice, ID3D12GraphicsCommandList *pd3dCommandList, ID3D12RootSignature *pd3dGraphicsRootSignature, CScene* OwnerScene)
 {
 	//m_pCamera = ChangeCamera(/*SPACESHIP_CAMERA*/THIRD_PERSON_CAMERA, 0.0f);
-	m_pCamera = ChangeCamera(FIRST_PERSON_CAMERA, 50.0f);
+	m_pCamera = ChangeCamera(FIRST_PERSON_CAMERA, 0.0f);
 
 	m_pShader = new CPlayerShader();
 	m_pShader->CreateShader(pd3dDevice, pd3dCommandList, pd3dGraphicsRootSignature);
 
 	CGameObject *pGameObject = CGameObject::LoadGeometryFromFile(pd3dDevice, pd3dCommandList, pd3dGraphicsRootSignature, "Model/Mi24.bin", m_pShader, OwnerScene);
-	pGameObject->BuildBroadphaseSphere();
 	SetChild(pGameObject);
 	if (pGameObject)
 	{
+		pGameObject->BuildBroadphaseSphere();
 		// 1. 자식의 로컬 OOBB를 가져옵니다 (LoadMeshFromFile에서 이미 계산됨).
 		BoundingOrientedBox childLocalOOBB = pGameObject->m_xmLocalOOBB;
 		BoundingSphere childLocalSphere = pGameObject->m_xmLocalSphere;
@@ -373,6 +335,9 @@ CAirplanePlayer::CAirplanePlayer(ID3D12Device *pd3dDevice, ID3D12GraphicsCommand
 		//    부모(CPlayer)의 로컬 공간 OOBB를 구합니다.
 		childLocalOOBB.Transform(m_xmLocalOOBB, xmmtxChildTransform);
 		childLocalSphere.Transform(m_xmLocalSphere, xmmtxChildTransform);
+		// The grid uses the aggregate bounds for objects with a model hierarchy.
+		pGameObject->m_xmBigOOGG.Transform(m_xmBigOOGG, xmmtxChildTransform);
+		UpdateTransform(nullptr);
 	}
 	PrepareAnimate();
 
@@ -459,7 +424,8 @@ CCamera *CAirplanePlayer::ChangeCamera(DWORD nNewCameraMode, float fTimeElapsed)
 		default:
 			break;
 	}
-	Update(fTimeElapsed);
+	// Switching viewpoints must not advance movement or apply friction.
+	UpdateCamera(0.0f, true);
 
 	return(m_pCamera);
 }
